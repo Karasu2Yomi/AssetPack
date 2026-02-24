@@ -15,3 +15,6 @@
 /third_party/doctest/doctest-build/
 /third_party/doctest/doctest-src/
 /third_party/doctest/doctest-tmp/
+/third_party/sdl3_image/sdl3_image-build/
+/third_party/sdl3_image/sdl3_image-tmp/
+/third_party/sdl3_image/sdl3_image-src/
