@@ -43,5 +43,5 @@ add_subdirectory(nlohmann_json)
 add_subdirectory(imgui)
 
 # doctest（third_party/doctest/CMakeLists.txt を使う）
-add_subdirectory(doctest)
+# add_subdirectory(doctest)
 

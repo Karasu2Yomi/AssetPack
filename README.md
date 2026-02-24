@@ -197,14 +197,6 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
-### 3. テスト（任意）
-
-```bash
-ctest --test-dir build
-```
-
----
-
 ## アーキテクチャ（責務分離）
 
 * `domain/`：データモデル（TileMap/Tileset/Layer）
@@ -221,3 +213,7 @@ ctest --test-dir build
 * 実行時データへ変換し、問題を早期に検出する
 * 出力物（bin）の可用性をツール自身で検証できる状態にする
 
+---
+
+## 作者
+羅 杰文
