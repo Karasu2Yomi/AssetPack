@@ -1,0 +1,17 @@
+/.idea
+/build
+/third_party/nlohmann_json/nlohmann_json-build/
+/third_party/nlohmann_json/nlohmann_json-src/
+/third_party/nlohmann_json/nlohmann_json-tmp/
+/third_party/nlohmann_json/nlohmann_json-subbuild/
+/third_party/imgui/imgui-build/
+/third_party/imgui/imgui-src/
+/third_party/imgui/imgui-tmp/
+/third_party/imgui/imgui-subbuild/
+/third_party/sdl3/sdl3-build/
+/third_party/sdl3/sdl3-src/
+/third_party/sdl3/sdl3-tmp/
+/third_party/sdl3/sdl3-subbuild/
+/third_party/doctest/doctest-build/
+/third_party/doctest/doctest-src/
+/third_party/doctest/doctest-tmp/
