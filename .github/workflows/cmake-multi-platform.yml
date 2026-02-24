@@ -1,0 +1,58 @@
+name: CMake (MinGW-w64)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # MSYS2 + MinGW-w64 toolchain
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          cache: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-pkg-config
+            git
+
+      # 以降の run は MSYS2(MINGW64) の bash で実行
+      - name: Configure
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DASSETPACK_BUILD_TESTS=ON
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} -j 10
+
+      - name: Test (ctest)
+        shell: msys2 {0}
+        run: |
+          ctest --test-dir build --output-on-failure
+
+      # 成果物（exe）をアップロード（任意）
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AssetPack-${{ matrix.build_type }}
+          path: build/AssetPack.exe
