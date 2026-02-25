@@ -22,4 +22,4 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
     GIT_TAG release-3.2.0
 )
-# FetchContent_MakeAvailable(sdl3_image)
+FetchContent_MakeAvailable(sdl3_image)

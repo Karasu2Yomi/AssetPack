@@ -216,4 +216,4 @@ cmake --build build -j
 ---
 
 ## 作者
-羅 杰文
+ラ ケツブン

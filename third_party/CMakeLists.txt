@@ -21,9 +21,15 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/sdl3
 # =========================
 add_subdirectory(sdl3_image)
 
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/sdl3_image/sdl3_image-src
-    ${CMAKE_CURRENT_BINARY_DIR}/sdl3_image-build
-    EXCLUDE_FROM_ALL)
+# 既に SDL3_image が定義済みなら、ここでは何もしない（重複防止）
+if (TARGET SDL3_image-static OR TARGET SDL3_image::SDL3_image-static OR TARGET SDL3_image::SDL3_image)
+    message(STATUS "SDL3_image targets already exist. Skip adding SDL3_image.")
+else()
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/sdl3_image/sdl3_image-src
+        ${CMAKE_CURRENT_BINARY_DIR}/sdl3_image-build
+        EXCLUDE_FROM_ALL)
+endif()
+
 
 
 # ターゲット名の揺れ吸収（環境によって -static/-shared が出ることがある）
