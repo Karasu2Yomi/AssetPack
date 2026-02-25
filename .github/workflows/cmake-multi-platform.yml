@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: write   # GitHub Release 作成/更新
+  packages: write   # GitHub Packages (NuGet) 公開
 
 jobs:
   build:
@@ -47,7 +47,8 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DASSETPACK_BUILD_TESTS=ON
+            -DASSETPACK_BUILD_TESTS=ON \
+            -DASSETPACK_COPY_RUNTIME_DLLS=OFF
 
       # Build
       - name: Build
@@ -55,40 +56,27 @@ jobs:
         run: |
           cmake --build build -j 10
 
-      # Test（テストが無い場合はそのまま継続）
+      # Test（テスト未作成でもCIを落とさない）
       - name: Test (ctest)
         shell: msys2 {0}
         run: |
-          ctest --test-dir build --output-on-failure || true
+          ctest --test-dir build --output-on-failure --no-tests=ignore
 
-      # exe の実際の出力先を検索して固定場所に集約
-      - name: Locate built exe
+      # Debug用: 出力確認（必要なら残す）
+      - name: List build outputs
         shell: msys2 {0}
         run: |
-          set -e
+          echo "=== build/bin ==="
+          ls -la build/bin || true
+          echo "=== build (top) ==="
+          find build -maxdepth 3 -type f | sort | head -n 200
 
-          APP_EXE_NAME="AssetPack-LUO_JIEWEN.exe"
-
-          mkdir -p ci_out
-
-          EXE_PATH=$(find build -type f -name "$APP_EXE_NAME" | head -n 1)
-
-          if [ -z "$EXE_PATH" ]; then
-            echo "ERROR: $APP_EXE_NAME not found under build/"
-            echo "---- files in build/ ----"
-            find build -maxdepth 6 -type f | sort
-            exit 1
-          fi
-
-          echo "Found exe: $EXE_PATH"
-          cp "$EXE_PATH" "ci_out/$APP_EXE_NAME"
-
-      # CI 用 Artifact（Debug/Release 両方）
+      # CI用 Artifact（Debug/Release 両方）
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
-          path: ci_out/AssetPack-LUO_JIEWEN.exe
+          path: build/bin/AssetPack-LUO_JIEWEN.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -101,7 +89,7 @@ jobs:
         run: |
           set -e
           mkdir -p dist
-          cp ci_out/AssetPack-LUO_JIEWEN.exe dist/
+          cp build/bin/AssetPack-LUO_JIEWEN.exe dist/
 
           # MinGW runtime DLL（必要に応じて追加）
           for f in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
@@ -109,6 +97,9 @@ jobs:
               cp /mingw64/bin/$f dist/
             fi
           done
+
+          echo "=== dist ==="
+          ls -la dist
 
       # タグ push の時だけ zip 作成
       - name: Zip release package
@@ -118,6 +109,7 @@ jobs:
           $zipName = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path dist\* -DestinationPath $zipName -Force
+          Write-Host "Created: $zipName"
 
       # タグ push の時だけ GitHub Release を作成/更新
       - name: Create or Update GitHub Release
