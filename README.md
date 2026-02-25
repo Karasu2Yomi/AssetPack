@@ -216,4 +216,4 @@ cmake --build build -j
 ---
 
 ## 作者
-ラ ケツブン
+LUO JIEWEN(ラ ケツブン)
