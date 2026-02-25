@@ -217,19 +217,21 @@ jobs:
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
+          # 既に同名 source がある場合に備えて削除（再実行でも失敗しにくくする）
+          nuget sources Remove -Name github | Out-Null
+          if ($LASTEXITCODE -ne 0) { $LASTEXITCODE = 0 }
+
           nuget sources Add `
             -Name github `
             -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
             -Username "${{ github.repository_owner }}" `
             -Password "${{ secrets.GITHUB_TOKEN }}" `
-            -StorePasswordInClearText `
-            -ConfigFile nuget.config
+            -StorePasswordInClearText
 
           Get-ChildItem nupkg\*.nupkg | ForEach-Object {
             nuget push $_.FullName `
               -Source github `
               -ApiKey "${{ secrets.GITHUB_TOKEN }}" `
               -SkipDuplicate `
-              -ConfigFile nuget.config `
               -NonInteractive
           }
