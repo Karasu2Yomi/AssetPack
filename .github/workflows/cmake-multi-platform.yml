@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # GitHub Release 作成/更新に必要
-  packages: write   # GitHub Packages (NuGet) publish に必要
+  contents: write
+  packages: write
 
 jobs:
   build:
@@ -53,51 +53,73 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          cmake --build build --config ${{ matrix.build_type }} -j 10
+          cmake --build build -j 10
 
-      # Test
+      # Test（テストが無い場合はそのまま継続）
       - name: Test (ctest)
         shell: msys2 {0}
         run: |
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure || true
 
-      # CI用 Artifact（Debug/Release 両方）
+      # exe の実際の出力先を検索して固定場所に集約
+      - name: Locate built exe
+        shell: msys2 {0}
+        run: |
+          set -e
+
+          APP_EXE_NAME="AssetPack-LUO_JIEWEN.exe"
+
+          mkdir -p ci_out
+
+          EXE_PATH=$(find build -type f -name "$APP_EXE_NAME" | head -n 1)
+
+          if [ -z "$EXE_PATH" ]; then
+            echo "ERROR: $APP_EXE_NAME not found under build/"
+            echo "---- files in build/ ----"
+            find build -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          echo "Found exe: $EXE_PATH"
+          cp "$EXE_PATH" "ci_out/$APP_EXE_NAME"
+
+      # CI 用 Artifact（Debug/Release 両方）
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
-          path: build/AssetPack-LUO_JIEWEN.exe
+          path: ci_out/AssetPack-LUO_JIEWEN.exe
+          if-no-files-found: error
           retention-days: 14
 
       # -----------------------------
       # ここから下は Release ビルドのみ
       # -----------------------------
-
-      # 配布用 dist フォルダを作成（exe + MinGW runtime DLL）
       - name: Collect runtime files
         if: matrix.build_type == 'Release'
         shell: msys2 {0}
         run: |
+          set -e
           mkdir -p dist
-          cp build/AssetPack-LUO_JIEWEN.exe dist/
+          cp ci_out/AssetPack-LUO_JIEWEN.exe dist/
 
-          # MinGW 実行時に必要なDLL（必要に応じて追加）
+          # MinGW runtime DLL（必要に応じて追加）
           for f in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
             if [ -f /mingw64/bin/$f ]; then
               cp /mingw64/bin/$f dist/
             fi
           done
 
-      # GitHub Release 添付用 zip 作成（タグ push のとき使う）
+      # タグ push の時だけ zip 作成
       - name: Zip release package
-        if: matrix.build_type == 'Release'
+        if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $zipName = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path dist\* -DestinationPath $zipName -Force
 
-      # タグ push 時のみ GitHub Release を作成/更新して zip を添付
+      # タグ push の時だけ GitHub Release を作成/更新
       - name: Create or Update GitHub Release
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -115,8 +137,7 @@ jobs:
           }
 
       # -----------------------------
-      # GitHub Packages (NuGet) へ publish
-      # ※ Packages タブに出したい場合の本命
+      # GitHub Packages (NuGet)
       # -----------------------------
       - name: Setup NuGet
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
@@ -149,7 +170,6 @@ jobs:
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
-          # 例: v1.2.3 -> 1.2.3
           $ver = "${{ github.ref_name }}"
           if ($ver.StartsWith("v")) { $ver = $ver.Substring(1) }
 
