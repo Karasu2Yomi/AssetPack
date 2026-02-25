@@ -70,7 +70,9 @@ if (MINGW)
 endif()
 
 # Windows: 実行時DLLコピー（ON のとき）
-if (WIN32 AND ASSETPACK_COPY_RUNTIME_DLLS)
+# TARGET_RUNTIME_DLLS は MinGW だと空になって POST_BUILD が壊れやすいので、
+# ここでは MSVC 限定にしておく（MinGW の DLL 収集は CI の ldd で行う）
+if (WIN32 AND MSVC AND ASSETPACK_COPY_RUNTIME_DLLS)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>

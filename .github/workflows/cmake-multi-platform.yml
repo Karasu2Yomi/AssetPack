@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: write   # GitHub Release 作成/更新
+  packages: write   # GitHub Packages (NuGet) 公開
 
 jobs:
   build:
@@ -27,6 +27,7 @@ jobs:
         with:
           submodules: recursive
 
+      # MSYS2 + MinGW-w64 toolchain
       - name: Setup MSYS2 (MINGW64)
         uses: msys2/setup-msys2@v2
         with:
@@ -38,50 +39,95 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-binutils
             git
 
+      # Configure
       - name: Configure
         shell: msys2 {0}
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DASSETPACK_BUILD_TESTS=ON \
-            -DASSETPACK_COPY_RUNTIME_DLLS=ON
+            -DASSETPACK_COPY_RUNTIME_DLLS=OFF
 
+      # Build
       - name: Build
         shell: msys2 {0}
         run: |
           cmake --build build -j 10
 
+      # Test（テスト未作成でもCIを落とさない）
       - name: Test (ctest)
         shell: msys2 {0}
         run: |
           ctest --test-dir build --output-on-failure --no-tests=ignore
 
+      # （デバッグ用）出力確認
+      - name: List build outputs
+        shell: msys2 {0}
+        run: |
+          echo "=== build/bin ==="
+          ls -la build/bin || true
+          echo "=== build files (top 200) ==="
+          find build -maxdepth 4 -type f | sort | head -n 200 || true
+
       # 実行に必要なファイルを dist に集約（Debug/Release 両方）
+      # MinGW では ldd ベースで DLL を拾う方が安定
       - name: Collect runtime files
         shell: msys2 {0}
         run: |
           set -e
+
+          EXE="build/bin/AssetPack-LUO_JIEWEN.exe"
+          if [ ! -f "$EXE" ]; then
+            echo "ERROR: $EXE not found"
+            exit 1
+          fi
+
           mkdir -p dist
+          cp "$EXE" dist/
 
-          # exe
-          cp build/bin/AssetPack-LUO_JIEWEN.exe dist/
+          # ldd から依存 DLL を抽出
+          # 例:
+          #   libstdc++-6.dll => /mingw64/bin/libstdc++-6.dll (...)
+          #   /mingw64/bin/SDL3.dll (...)
+          # Windows system DLL は除外
+          ldd "$EXE" | tr -d '\r' | awk '
+            {
+              p=""
+              # pattern 1: xxx.dll => /path/to/xxx.dll
+              if ($0 ~ /=>/ && $3 ~ /\.dll$/) {
+                p=$3
+              }
+              # pattern 2: /path/to/xxx.dll (direct)
+              else if ($1 ~ /^\/.*\.dll$/) {
+                p=$1
+              }
 
-          # CMake (TARGET_RUNTIME_DLLS) が build/bin にコピーした DLL 群（SDL3.dll, SDL3_image.dll など）
-          cp -f build/bin/*.dll dist/ 2>/dev/null || true
+              if (p != "") {
+                low=p
+                # Windows system DLL は除外（同梱しない）
+                if (low ~ /^\/[a-z]\/windows\// || low ~ /^\/[a-z]\/Windows\//) next
+                print p
+              }
+            }
+          ' | sort -u > dlls.txt
 
-          # MinGW runtime DLL（保険: これがないと今回のようなエラーになりやすい）
-          for f in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
-            if [ -f /mingw64/bin/$f ]; then
-              cp /mingw64/bin/$f dist/
+          echo "=== DLLs from ldd ==="
+          cat dlls.txt || true
+
+          while IFS= read -r f; do
+            if [ -f "$f" ]; then
+              cp -f "$f" dist/
             fi
-          done
+          done < dlls.txt
 
           echo "=== dist contents ==="
           ls -la dist
 
-      # Artifact には dist を丸ごと入れる（exe単体はNG）
+      # CI用 Artifact（Debug/Release 両方）
+      # 重要: exe単体ではなく dist 丸ごと
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -90,7 +136,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # タグ時のみ zip（Release 用）
+      # -----------------------------
+      # ここから下は Release ビルド + タグ push 時のみ
+      # -----------------------------
+
       - name: Zip release package
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -98,6 +147,7 @@ jobs:
           $zipName = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path dist\* -DestinationPath $zipName -Force
+          Write-Host "Created: $zipName"
 
       - name: Create or Update GitHub Release
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
@@ -115,7 +165,9 @@ jobs:
             gh release upload $tag $asset --clobber
           }
 
-      # NuGet (Packages)
+      # -----------------------------
+      # GitHub Packages (NuGet)
+      # -----------------------------
       - name: Setup NuGet
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         uses: NuGet/setup-nuget@v2
@@ -159,6 +211,8 @@ jobs:
             -OutputDirectory nupkg `
             -NonInteractive
 
+          Get-ChildItem nupkg
+
       - name: Publish to GitHub Packages (NuGet)
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -171,9 +225,11 @@ jobs:
             -StorePasswordInClearText `
             -ConfigFile nuget.config
 
-          nuget push "nupkg\*.nupkg" `
-            -Source github `
-            -ApiKey "${{ secrets.GITHUB_TOKEN }}" `
-            -SkipDuplicate `
-            -ConfigFile nuget.config `
-            -NonInteractive
+          Get-ChildItem nupkg\*.nupkg | ForEach-Object {
+            nuget push $_.FullName `
+              -Source github `
+              -ApiKey "${{ secrets.GITHUB_TOKEN }}" `
+              -SkipDuplicate `
+              -ConfigFile nuget.config `
+              -NonInteractive
+          }
