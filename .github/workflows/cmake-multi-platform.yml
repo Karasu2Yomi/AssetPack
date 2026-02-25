@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # GitHub Release 作成/更新
-  packages: write   # GitHub Packages (NuGet) 公開
+  contents: write
+  packages: write
 
 jobs:
   build:
@@ -27,7 +27,6 @@ jobs:
         with:
           submodules: recursive
 
-      # MSYS2 + MinGW-w64 toolchain
       - name: Setup MSYS2 (MINGW64)
         uses: msys2/setup-msys2@v2
         with:
@@ -41,67 +40,57 @@ jobs:
             mingw-w64-x86_64-pkg-config
             git
 
-      # Configure
       - name: Configure
         shell: msys2 {0}
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DASSETPACK_BUILD_TESTS=ON \
-            -DASSETPACK_COPY_RUNTIME_DLLS=OFF
+            -DASSETPACK_COPY_RUNTIME_DLLS=ON
 
-      # Build
       - name: Build
         shell: msys2 {0}
         run: |
           cmake --build build -j 10
 
-      # Test（テスト未作成でもCIを落とさない）
       - name: Test (ctest)
         shell: msys2 {0}
         run: |
           ctest --test-dir build --output-on-failure --no-tests=ignore
 
-      # Debug用: 出力確認（必要なら残す）
-      - name: List build outputs
-        shell: msys2 {0}
-        run: |
-          echo "=== build/bin ==="
-          ls -la build/bin || true
-          echo "=== build (top) ==="
-          find build -maxdepth 3 -type f | sort | head -n 200
-
-      # CI用 Artifact（Debug/Release 両方）
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
-          path: build/bin/AssetPack-LUO_JIEWEN.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      # -----------------------------
-      # ここから下は Release ビルドのみ
-      # -----------------------------
+      # 実行に必要なファイルを dist に集約（Debug/Release 両方）
       - name: Collect runtime files
-        if: matrix.build_type == 'Release'
         shell: msys2 {0}
         run: |
           set -e
           mkdir -p dist
+
+          # exe
           cp build/bin/AssetPack-LUO_JIEWEN.exe dist/
 
-          # MinGW runtime DLL（必要に応じて追加）
+          # CMake (TARGET_RUNTIME_DLLS) が build/bin にコピーした DLL 群（SDL3.dll, SDL3_image.dll など）
+          cp -f build/bin/*.dll dist/ 2>/dev/null || true
+
+          # MinGW runtime DLL（保険: これがないと今回のようなエラーになりやすい）
           for f in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
             if [ -f /mingw64/bin/$f ]; then
               cp /mingw64/bin/$f dist/
             fi
           done
 
-          echo "=== dist ==="
+          echo "=== dist contents ==="
           ls -la dist
 
-      # タグ push の時だけ zip 作成
+      # Artifact には dist を丸ごと入れる（exe単体はNG）
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      # タグ時のみ zip（Release 用）
       - name: Zip release package
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -109,9 +98,7 @@ jobs:
           $zipName = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path dist\* -DestinationPath $zipName -Force
-          Write-Host "Created: $zipName"
 
-      # タグ push の時だけ GitHub Release を作成/更新
       - name: Create or Update GitHub Release
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -128,9 +115,7 @@ jobs:
             gh release upload $tag $asset --clobber
           }
 
-      # -----------------------------
-      # GitHub Packages (NuGet)
-      # -----------------------------
+      # NuGet (Packages)
       - name: Setup NuGet
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         uses: NuGet/setup-nuget@v2
