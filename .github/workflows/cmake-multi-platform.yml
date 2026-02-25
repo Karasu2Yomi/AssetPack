@@ -54,5 +54,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AssetPack-${{ matrix.build_type }}
-          path: build/AssetPack.exe
+          name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
+          path: build/AssetPack-LUO_JIEWEN.exe
