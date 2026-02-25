@@ -2,7 +2,16 @@ name: CMake (MinGW-w64)
 
 on:
   push:
+    branches:
+      - main
+    tags:
+      - "v*"
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # GitHub Release 作成/更新に必要
+  packages: write   # GitHub Packages (NuGet) publish に必要
 
 jobs:
   build:
@@ -32,7 +41,7 @@ jobs:
             mingw-w64-x86_64-pkg-config
             git
 
-      # 以降の run は MSYS2(MINGW64) の bash で実行
+      # Configure
       - name: Configure
         shell: msys2 {0}
         run: |
@@ -40,19 +49,134 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DASSETPACK_BUILD_TESTS=ON
 
+      # Build
       - name: Build
         shell: msys2 {0}
         run: |
           cmake --build build --config ${{ matrix.build_type }} -j 10
 
+      # Test
       - name: Test (ctest)
         shell: msys2 {0}
         run: |
           ctest --test-dir build --output-on-failure
 
-      # 成果物（exe）をアップロード（任意）
+      # CI用 Artifact（Debug/Release 両方）
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
           path: build/AssetPack-LUO_JIEWEN.exe
+          retention-days: 14
+
+      # -----------------------------
+      # ここから下は Release ビルドのみ
+      # -----------------------------
+
+      # 配布用 dist フォルダを作成（exe + MinGW runtime DLL）
+      - name: Collect runtime files
+        if: matrix.build_type == 'Release'
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist
+          cp build/AssetPack-LUO_JIEWEN.exe dist/
+
+          # MinGW 実行時に必要なDLL（必要に応じて追加）
+          for f in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
+            if [ -f /mingw64/bin/$f ]; then
+              cp /mingw64/bin/$f dist/
+            fi
+          done
+
+      # GitHub Release 添付用 zip 作成（タグ push のとき使う）
+      - name: Zip release package
+        if: matrix.build_type == 'Release'
+        shell: pwsh
+        run: |
+          $zipName = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
+          if (Test-Path $zipName) { Remove-Item $zipName -Force }
+          Compress-Archive -Path dist\* -DestinationPath $zipName -Force
+
+      # タグ push 時のみ GitHub Release を作成/更新して zip を添付
+      - name: Create or Update GitHub Release
+        if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $asset = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag $asset --title $tag --generate-notes
+          } else {
+            gh release upload $tag $asset --clobber
+          }
+
+      # -----------------------------
+      # GitHub Packages (NuGet) へ publish
+      # ※ Packages タブに出したい場合の本命
+      # -----------------------------
+      - name: Setup NuGet
+        if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
+        uses: NuGet/setup-nuget@v2
+
+      - name: Create nuspec
+        if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          @"
+          <?xml version="1.0"?>
+          <package>
+            <metadata>
+              <id>AssetPack.LUO_JIEWEN</id>
+              <version>0.0.0</version>
+              <authors>${{ github.repository_owner }}</authors>
+              <owners>${{ github.repository_owner }}</owners>
+              <requireLicenseAcceptance>false</requireLicenseAcceptance>
+              <description>AssetPack tool (MinGW build)</description>
+              <repository type="git" url="https://github.com/${{ github.repository }}" />
+              <tags>cpp mingw tool</tags>
+            </metadata>
+            <files>
+              <file src="dist\**\*.*" target="tools" />
+            </files>
+          </package>
+          "@ | Set-Content AssetPack.LUO_JIEWEN.nuspec -Encoding UTF8
+
+      - name: Pack NuGet
+        if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          # 例: v1.2.3 -> 1.2.3
+          $ver = "${{ github.ref_name }}"
+          if ($ver.StartsWith("v")) { $ver = $ver.Substring(1) }
+
+          (Get-Content AssetPack.LUO_JIEWEN.nuspec) `
+            -replace '<version>.*</version>', "<version>$ver</version>" `
+            | Set-Content AssetPack.LUO_JIEWEN.nuspec -Encoding UTF8
+
+          nuget pack AssetPack.LUO_JIEWEN.nuspec `
+            -NoPackageAnalysis `
+            -OutputDirectory nupkg `
+            -NonInteractive
+
+      - name: Publish to GitHub Packages (NuGet)
+        if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          nuget sources Add `
+            -Name github `
+            -Source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
+            -Username "${{ github.repository_owner }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}" `
+            -StorePasswordInClearText `
+            -ConfigFile nuget.config
+
+          nuget push "nupkg\*.nupkg" `
+            -Source github `
+            -ApiKey "${{ secrets.GITHUB_TOKEN }}" `
+            -SkipDuplicate `
+            -ConfigFile nuget.config `
+            -NonInteractive
