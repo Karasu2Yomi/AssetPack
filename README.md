@@ -52,3 +52,14 @@ ctest --test-dir build --output-on-failure
 ## 実行ファイル
 
 - `build/bin/AssetPack.exe`
+
+## 別の Windows PC へ配布
+
+MinGW ビルドでは GCC、C++ 標準ライブラリ、winpthreads の実行時コードを
+EXE に静的リンクするため、受け取る PC に MinGW をインストールする必要はない。
+ビルド後に EXE の依存関係を検査し、`libgcc_s_seh-1.dll`、`libstdc++-6.dll`、
+`libwinpthread-1.dll` への依存が残っていればビルドを失敗させる。
+
+配布には最新の `build/bin/AssetPack.exe` を使用する。
+ゲームのデータ・画像は別途リソースフォルダとして渡し、起動後にその中の
+`data` フォルダを開く。以前にコピーした EXE は、新しくビルドしたものに差し替える。

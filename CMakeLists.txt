@@ -26,6 +26,14 @@ include(CTest)
 # -----------------------------
 add_subdirectory(third_party)
 
+# SDL and SDL_image are static, but MinGW's C++ runtime is shared by default.
+# Also link winpthreads statically so the exe can start without a MinGW install.
+function(assetpack_link_runtime target)
+    if (MINGW)
+        target_link_options(${target} PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+endfunction()
+
 set(ASSETPACK_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/assetpack_core/CsvCodec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/assetpack_core/PuzzleProjectStore.cpp
@@ -65,6 +73,7 @@ if (BUILD_TESTING AND ASSETPACK_BUILD_TESTS)
     if (WIN32)
         target_link_libraries(assetpack_editor_tests PRIVATE ole32 uuid)
     endif()
+    assetpack_link_runtime(assetpack_editor_tests)
     add_test(NAME assetpack_editor_tests COMMAND assetpack_editor_tests)
 endif()
 
@@ -109,6 +118,15 @@ endif()
 
 if (MINGW)
     target_link_options(${PROJECT_NAME} PRIVATE -mconsole)
+    assetpack_link_runtime(${PROJECT_NAME})
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            "-DEXECUTABLE=$<TARGET_FILE:${PROJECT_NAME}>"
+            "-DOBJDUMP=${CMAKE_OBJDUMP}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyMinGWRuntime.cmake"
+        COMMENT "Checking that AssetPack does not require MinGW runtime DLLs"
+        VERBATIM
+    )
 endif()
 
 if (WIN32 AND MSVC AND ASSETPACK_COPY_RUNTIME_DLLS)
