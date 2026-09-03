@@ -6,15 +6,11 @@
 #include "UiViewport.hpp"
 #include "UiInspector.hpp"
 #include "UiBottomTabs.hpp"
+#include "UiLabels.hpp"
 
 namespace UI {
 
 static void SetupDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& size) {
-    const char* leftWindow = "左: レベル / マップノード / ノードひな形";
-    const char* centerWindow = "中央: Puzzle Canvas";
-    const char* rightWindow = "右: プロパティ";
-    const char* bottomWindow = "下: 問題 / ログ";
-
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace_id, size);
@@ -29,10 +25,10 @@ static void SetupDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& size) {
     ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.22f, &dockLeft, &dockCenter);
     ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Right, 0.24f, &dockRight, &dockCenter);
 
-    ImGui::DockBuilderDockWindow(leftWindow, dockLeft);
-    ImGui::DockBuilderDockWindow(centerWindow, dockCenter);
-    ImGui::DockBuilderDockWindow(rightWindow, dockRight);
-    ImGui::DockBuilderDockWindow(bottomWindow, dockBottom);
+    ImGui::DockBuilderDockWindow(kProjectWindowTitle, dockLeft);
+    ImGui::DockBuilderDockWindow(kViewportWindowTitle, dockCenter);
+    ImGui::DockBuilderDockWindow(kInspectorWindowTitle, dockRight);
+    ImGui::DockBuilderDockWindow(kBottomWindowTitle, dockBottom);
     ImGui::DockBuilderFinish(dockspace_id);
 }
 

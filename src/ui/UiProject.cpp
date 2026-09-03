@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <filesystem>
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -13,12 +14,19 @@
 #include "app/Logger.hpp"
 #include "assetpack_core/PuzzleProjectStore.hpp"
 #include "platform/WinFileDialog.hpp"
+#include "ui/UiLabels.hpp"
 
 namespace {
 
 using namespace AssetPackCore;
 using App::EditorAppState;
 using App::SelectTarget;
+
+static void DrawNewTextInput(const char* label, const char* id, std::string& value) {
+    ImGui::TextUnformatted(label);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputText(id, &value);
+}
 
 static bool IsValidId(const std::string& text) {
     if (text.empty() || text.size() > 128) {
@@ -143,8 +151,8 @@ static void DrawLevelSection(EditorAppState& s) {
 
     static std::string newId;
     static std::string newName;
-    ImGui::InputText("新規ID（level_id）", &newId);
-    ImGui::InputText("新規名（level_name）", &newName);
+    DrawNewTextInput("新規レベル識別子", "##level_id", newId);
+    DrawNewTextInput("新規レベル名", "##level_name", newName);
 
     if (ImGui::Button("追加")) {
         if (App::EditorApp::CreateLevel(s, NormalizePath(newId), newName)) {
@@ -156,7 +164,7 @@ static void DrawLevelSection(EditorAppState& s) {
     ImGui::SameLine();
 
     if (ImGui::Button("複製") && App::EditorApp::DuplicateSelectedLevel(s)) {
-        App::Log(s, "レベルを複製しました（map は別ファイル）。");
+        App::Log(s, "レベルを複製しました（マップは別ファイル）。");
     }
     ImGui::SameLine();
 
@@ -178,7 +186,7 @@ static void DrawLevelSection(EditorAppState& s) {
     if (ImGui::Button("削除") && s.selectedLevelIndex >= 0) {
         const auto deleted = s.project.levels[s.selectedLevelIndex].level_id;
         if (RemoveLevel(s, s.selectedLevelIndex)) {
-            App::Log(s, "レベル削除: " + deleted + "（map は削除しません）");
+            App::Log(s, "レベル削除: " + deleted + "（マップは削除しません）");
         }
     }
 
@@ -201,7 +209,7 @@ static void DrawLevelSection(EditorAppState& s) {
                 break;
             }
         }
-        if (shared) ImGui::TextUnformatted("同一 map_path を共有しています（共有マップ）");
+        if (shared) ImGui::TextUnformatted("同じマップファイルを共有しています（共有マップ）");
         ImGui::Text("選択中マップ: %s", level.map_path.c_str());
     }
 }
@@ -211,16 +219,15 @@ static void DrawPresetSection(EditorAppState& s) {
     static std::string newPresetId;
     static int newPresetType = 0;
 
-    ImGui::InputText("新規 preset_id", &newPresetId);
-    const char* types[] = {"root", "follow", "end", "dead"};
-    ImGui::Combo("type", &newPresetType, types, 4);
+    DrawNewTextInput("新規ひな形識別子", "##preset_id", newPresetId);
+    ImGui::Combo("種類##type", &newPresetType, UI::kNodeTypeLabels, 4);
 
     if (ImGui::Button("追加")) {
         const std::string id = MakeUniquePresetId(s, NormalizePath(newPresetId));
         if (!id.empty() && IsValidId(id)) {
             NodePresetRow p;
             p.preset_id = id;
-            p.node_type = types[newPresetType];
+            p.node_type = UI::kNodeTypeValues[newPresetType];
             p.texture_path.clear();
             p.width_tiles = "1";
             p.height_tiles = "1";
@@ -232,7 +239,7 @@ static void DrawPresetSection(EditorAppState& s) {
             s.project.presetsDirty = true;
             newPresetId.clear();
         } else {
-            App::Log(s, "エラー: preset_id は lower_snake_case で入力してください。");
+            App::Log(s, "エラー: ひな形識別子は半角英小文字と数字を使い、単語をアンダースコアで区切って入力してください。");
         }
     }
     ImGui::SameLine();
@@ -279,7 +286,7 @@ static void DrawPresetSection(EditorAppState& s) {
         const auto& p = s.project.presets[i];
         const std::string usage = PresetUsageHint(s, p.preset_id);
         const std::string label =
-            p.preset_id + " (" + p.node_type + ")" +
+            p.preset_id + " (" + UI::NodeTypeLabel(p.node_type) + ")" +
             (usage.empty() ? "" : " / " + usage);
         const bool sel = (s.selectedPresetIndex == i &&
                           s.selectedTarget == SelectTarget::Preset);
@@ -401,7 +408,7 @@ static void DrawMapNodeSection(EditorAppState& s) {
 namespace UI {
 
 void DrawProjectPanel(App::EditorAppState& s) {
-    ImGui::Begin("左: レベル / マップノード / ノードひな形",
+    ImGui::Begin(kProjectWindowTitle,
                  nullptr,
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse);
@@ -426,9 +433,14 @@ void DrawProjectPanel(App::EditorAppState& s) {
         }
     }
 
-    ImGui::SameLine();
+    const auto& style = ImGui::GetStyle();
+    const float saveButtonWidth = ImGui::CalcTextSize("すべて保存").x + style.FramePadding.x * 2.0f;
+    if (ImGui::GetItemRectSize().x + style.ItemSpacing.x + saveButtonWidth <=
+        ImGui::GetContentRegionAvail().x) {
+        ImGui::SameLine();
+    }
     ImGui::BeginDisabled(!s.projectLoaded);
-    if (ImGui::Button("Save All")) {
+    if (ImGui::Button("すべて保存")) {
         App::EditorApp app;
         if (app.SaveAll(s)) {
             App::Log(s, "保存しました。");
@@ -439,9 +451,9 @@ void DrawProjectPanel(App::EditorAppState& s) {
     ImGui::EndDisabled();
 
     if (s.projectLoaded) {
-        ImGui::Text(s.project.HasDirty() ? "* 保存未了" : "保存済み");
-        ImGui::Text("levels.csv: %s", s.project.levelsPath.generic_string().c_str());
-        ImGui::Text("nodes.csv: %s", s.project.nodesPath.generic_string().c_str());
+        ImGui::Text(s.project.HasDirty() ? "* 未保存の変更あり" : "保存済み");
+        ImGui::Text("レベル設定: %s", s.project.levelsPath.generic_string().c_str());
+        ImGui::Text("ノードひな形設定: %s", s.project.nodesPath.generic_string().c_str());
     }
 
     if (!s.projectLoaded) {

@@ -14,15 +14,13 @@
 
 #include "app/EditorApp.hpp"
 #include "ui/UiInspector.hpp"
+#include "ui/UiLabels.hpp"
 #include "ui/UiProject.hpp"
 #include "ui/UiViewport.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
-
-constexpr const char* kProjectWindow = "左: レベル / マップノード / ノードひな形";
-constexpr const char* kViewportWindow = "中央: Puzzle Canvas";
 
 struct TemporaryProject {
     fs::path parent = fs::temp_directory_path().lexically_normal();
@@ -114,14 +112,14 @@ struct UiFixture {
     }
 
     void ActivateSectionButton(const char* section, const char* label) {
-        auto* window = ImGui::FindWindowByName(kProjectWindow);
+        auto* window = ImGui::FindWindowByName(UI::kProjectWindowTitle);
         REQUIRE(window != nullptr);
         const ImGuiID sectionId = ImHashStr(section, 0, window->ID);
         Activate(ImHashStr(label, 0, sectionId));
     }
 
     void ActivateListRow(const char* listName, const char* label) {
-        auto* parent = ImGui::FindWindowByName(kProjectWindow);
+        auto* parent = ImGui::FindWindowByName(UI::kProjectWindowTitle);
         REQUIRE(parent != nullptr);
         ImGuiWindow* child = nullptr;
         const std::string marker = std::string("/") + listName + "_";
@@ -143,7 +141,7 @@ struct UiFixture {
         Frame();
         ActivateListRow("level_list", "draft");
         REQUIRE(state.selectedLevelIndex == 0);
-        ActivateListRow("preset_list", "root (root)");
+        ActivateListRow("preset_list", "root (始点)");
         REQUIRE(state.selectedPresetIndex == 0);
         REQUIRE(state.selectedLevelIndex == 0);
         REQUIRE(state.selectedTarget == App::SelectTarget::Preset);
@@ -151,7 +149,7 @@ struct UiFixture {
     }
 
     ImVec2 TileCenter(int x, int y) const {
-        const auto* window = ImGui::FindWindowByName(kViewportWindow);
+        const auto* window = ImGui::FindWindowByName(UI::kViewportWindowTitle);
         REQUIRE(window != nullptr);
         const float maximum = std::numeric_limits<float>::max();
         ImVec2 minimum(maximum, maximum);

@@ -23,7 +23,7 @@ private:
                                    std::size_t column,
                                    const std::string& detail) {
         std::ostringstream stream;
-        stream << "line " << line << ", column " << column << ": " << detail;
+        stream << line << "行目、" << column << "列目: " << detail;
         return stream.str();
     }
 };
@@ -69,7 +69,7 @@ namespace AssetPackCore::CsvCodec {
 CsvParseResult Parse(const std::string_view text) {
     try {
         if (text.empty()) {
-            return {std::nullopt, "line 1, column 1: CSV is empty"};
+            return {std::nullopt, "1行目、1列目: CSVが空です。"};
         }
 
         std::string_view safe = text;
@@ -99,7 +99,7 @@ CsvParseResult Parse(const std::string_view text) {
             if (safe[index] == '\r') {
                 if (index + 1 >= safe.size() || safe[index + 1] != '\n') {
                     throw CsvSyntaxError(line, column,
-                                         "carriage return must be followed by line feed");
+                                         "改行コードのCRの直後にはLFが必要です。");
                 }
                 index += 2;
             } else {
@@ -174,7 +174,7 @@ CsvParseResult Parse(const std::string_view text) {
 
             if (state == ParseState::Unquoted) {
                 if (ch == '"') {
-                    throw CsvSyntaxError(line, column, "quote must begin a quoted field");
+                    throw CsvSyntaxError(line, column, "引用符で囲む項目は、先頭から引用符で始めてください。");
                 }
                 if (ch == ',') {
                     appendField();
@@ -193,18 +193,18 @@ CsvParseResult Parse(const std::string_view text) {
                 consume(true);
                 continue;
             }
-            throw CsvSyntaxError(line, column, "unexpected character after closing quote");
+            throw CsvSyntaxError(line, column, "閉じ引用符の後に使用できない文字があります。");
         }
 
         if (state == ParseState::Quoted) {
-            throw CsvSyntaxError(quotedLine, quotedColumn, "unterminated quoted field");
+            throw CsvSyntaxError(quotedLine, quotedColumn, "引用符で囲まれた項目が閉じられていません。");
         }
         if (recordOpen) {
             appendRecord();
         }
 
         if (records.empty()) {
-            throw CsvSyntaxError(1, 1, "CSV does not contain a header record");
+            throw CsvSyntaxError(1, 1, "CSVにヘッダー行がありません。");
         }
 
         CsvDocument out;
@@ -215,14 +215,16 @@ CsvParseResult Parse(const std::string_view text) {
             CsvRecord& rec = records[i];
             if (rec.fields.size() != expected) {
                 throw CsvSyntaxError(rec.lineNumber, 1,
-                                     "record has " + std::to_string(rec.fields.size()) +
-                                         " fields; expected " + std::to_string(expected));
+                                     "項目数が" + std::to_string(rec.fields.size()) +
+                                         "個です。" + std::to_string(expected) + "個必要です。");
             }
             out.records.push_back(std::move(rec));
         }
         return {std::move(out), {}};
-    } catch (const std::exception& ex) {
+    } catch (const CsvSyntaxError& ex) {
         return {std::nullopt, ex.what()};
+    } catch (const std::exception&) {
+        return {std::nullopt, "CSVの解析中に予期しないエラーが発生しました。"};
     }
 }
 

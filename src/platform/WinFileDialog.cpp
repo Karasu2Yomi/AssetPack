@@ -30,6 +30,7 @@ namespace {
         }
 
         dlg->SetTitle(title);
+        dlg->SetOkButtonLabel((opts & FOS_PICKFOLDERS) ? L"このフォルダを選択" : L"開く");
 
         FILEOPENDIALOGOPTIONS cur = 0;
         dlg->GetOptions(&cur);

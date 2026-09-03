@@ -39,14 +39,14 @@ bool TextureCache::GetOrLoad(SDL_Renderer* renderer,
     }
 
     if (!renderer) {
-        if (outErr) *outErr = "renderer is null";
+        if (outErr) *outErr = "描画機能が初期化されていません。";
         return false;
     }
 
     SDL_Surface* surface = IMG_Load(abs.c_str());
     if (!surface) {
         if (outErr) {
-            *outErr = "SDL_image load failed: " + std::string(SDL_GetError());
+            *outErr = "画像を読み込めません。ファイルの場所と形式を確認してください: " + abs;
         }
         return false;
     }
@@ -58,7 +58,7 @@ bool TextureCache::GetOrLoad(SDL_Renderer* renderer,
     SDL_DestroySurface(surface);
     if (!data.texture) {
         if (outErr) {
-            *outErr = "create texture failed: " + std::string(SDL_GetError());
+            *outErr = "画像を描画用に準備できません: " + abs;
         }
         return false;
     }

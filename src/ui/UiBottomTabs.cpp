@@ -1,4 +1,5 @@
 #include "UiBottomTabs.hpp"
+#include "UiLabels.hpp"
 
 #include <algorithm>
 #include <imgui.h>
@@ -11,7 +12,7 @@ namespace {
 using namespace App;
 
 static const char* SeverityText(const AssetPackCore::IssueSeverity s) {
-    return s == AssetPackCore::IssueSeverity::Error ? "Error" : "Warn";
+    return s == AssetPackCore::IssueSeverity::Error ? "エラー" : "警告";
 }
 
 }  // namespace
@@ -19,7 +20,7 @@ static const char* SeverityText(const AssetPackCore::IssueSeverity s) {
 namespace UI {
 
 void DrawBottomTabs(App::EditorAppState& s) {
-    ImGui::Begin("下: 問題 / ログ",
+    ImGui::Begin(kBottomWindowTitle,
                  nullptr,
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse);
@@ -27,10 +28,11 @@ void DrawBottomTabs(App::EditorAppState& s) {
     if (ImGui::BeginTabBar("BottomTabs")) {
         if (ImGui::BeginTabItem("問題")) {
             for (const auto& it : s.issues) {
-                const std::string loc = it.file + ":" + std::to_string(it.line);
+                const std::string loc = it.file +
+                    (it.line > 0 ? "（" + std::to_string(it.line) + "行目）" : "");
                 const std::string field =
-                    it.field.empty() ? std::string{} : " (" + it.field + ")";
-                ImGui::Text("[%s] %s%s %s", SeverityText(it.severity), loc.c_str(),
+                    it.field.empty() ? std::string{} : std::string("（") + FieldLabel(it.field) + "）";
+                ImGui::TextWrapped("[%s] %s%s %s", SeverityText(it.severity), loc.c_str(),
                             field.c_str(), it.message.c_str());
             }
             if (s.issues.empty()) {
@@ -40,12 +42,12 @@ void DrawBottomTabs(App::EditorAppState& s) {
         }
 
         if (ImGui::BeginTabItem("ログ")) {
-            if (ImGui::Button("Clear")) {
+            if (ImGui::Button("ログを消去##Clear")) {
                 s.console.clear();
             }
             ImGui::Separator();
             for (const auto& line : s.console) {
-                ImGui::TextUnformatted(line.c_str());
+                ImGui::TextWrapped("%s", line.c_str());
             }
             ImGui::EndTabItem();
         }
@@ -53,9 +55,9 @@ void DrawBottomTabs(App::EditorAppState& s) {
     }
 
     if (s.promptSaveBeforeClose) {
-        ImGui::OpenPopup("close_confirm");
+        ImGui::OpenPopup("終了の確認###close_confirm");
     }
-    if (ImGui::BeginPopupModal("close_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal("終了の確認###close_confirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted("保存されていない変更があります。");
         ImGui::TextUnformatted("閉じる前にどうしますか？");
         if (ImGui::Button("保存して終了")) {

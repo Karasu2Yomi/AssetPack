@@ -8,6 +8,7 @@
 #include "app/Logger.hpp"
 #include "assetpack_core/PuzzleResolver.hpp"
 #include "ui/TilesetTextureCache.hpp"
+#include "ui/UiLabels.hpp"
 
 namespace {
 
@@ -118,7 +119,7 @@ static void DrawCanvasBg(EditorAppState& s, ImDrawList* drawList,
 static void DrawNodeTextLabel(ImDrawList* drawList, const ImVec2& p0,
                              const ImVec2& p1, bool selected,
                              const std::string& text) {
-    const std::string show = text.empty() ? "(no-name)" : text;
+    const std::string show = text.empty() ? "名称未設定" : text;
     const ImVec2 labelSize = ImGui::CalcTextSize(show.c_str());
     const float x = p0.x + std::max(2.0f, (p1.x - p0.x - labelSize.x) * 0.5f);
     const float y = p0.y + std::max(2.0f, (p1.y - p0.y - labelSize.y) * 0.5f);
@@ -134,7 +135,7 @@ static void DrawNodeTextLabel(ImDrawList* drawList, const ImVec2& p0,
 namespace UI {
 
 void DrawViewportPanel(App::EditorAppState& s, SDL_Renderer* renderer) {
-    ImGui::Begin("中央: Puzzle Canvas",
+    ImGui::Begin(kViewportWindowTitle,
                  nullptr,
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse);

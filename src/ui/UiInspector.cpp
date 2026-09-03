@@ -1,7 +1,9 @@
 #include "UiInspector.hpp"
+#include "UiLabels.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <filesystem>
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -73,7 +75,7 @@ static bool IsInsideResourceRoot(const std::filesystem::path& root,
     std::error_code ec{};
     const auto rootAbs = std::filesystem::weakly_canonical(root, ec);
     if (ec) {
-        if (reason) *reason = "resourceRoot canonicalization failed";
+        if (reason) *reason = "リソースフォルダーのパスを確認できませんでした。";
         return false;
     }
 
@@ -81,7 +83,7 @@ static bool IsInsideResourceRoot(const std::filesystem::path& root,
                              ? std::filesystem::weakly_canonical(candidate, ec)
                              : std::filesystem::weakly_canonical(root / candidate, ec);
     if (ec) {
-        if (reason) *reason = "path canonicalization failed";
+        if (reason) *reason = "選択したファイルのパスを確認できませんでした。";
         return false;
     }
 
@@ -89,7 +91,7 @@ static bool IsInsideResourceRoot(const std::filesystem::path& root,
     auto jt = rootAbs.begin();
     while (jt != rootAbs.end()) {
         if (it == candAbs.end() || *it != *jt) {
-            if (reason) *reason = "path is outside selected data root";
+            if (reason) *reason = "選択したファイルがリソースフォルダーの外にあります。";
             return false;
         }
         ++it;
@@ -102,7 +104,7 @@ static bool RenameLevelId(EditorAppState& s, int levelIndex,
                          const std::string& from, const std::string& to) {
     if (from == to) return true;
     if (!IsValidId(to)) {
-        App::Log(s, "エラー: level_id は lower_snake_case にしてください。");
+        App::Log(s, "エラー: レベル識別子は64文字以内の半角英小文字・数字・アンダースコアにしてください。先頭に数字、末尾や連続したアンダースコアは使えません。");
         return false;
     }
     auto it = std::find_if(s.project.levels.begin(), s.project.levels.end(),
@@ -110,7 +112,7 @@ static bool RenameLevelId(EditorAppState& s, int levelIndex,
                                return l.level_id == to && (&l != &s.project.levels[levelIndex]);
                            });
     if (it != s.project.levels.end()) {
-        App::Log(s, "エラー: level_id が重複しています。");
+        App::Log(s, "エラー: レベル識別子が重複しています。");
         return false;
     }
     for (auto& l : s.project.levels) {
@@ -127,7 +129,7 @@ static bool RenamePresetId(App::EditorAppState& s, int presetIndex,
                           const std::string& from, const std::string& to) {
     if (from == to) return true;
     if (!IsValidId(to)) {
-        App::Log(s, "エラー: preset_id は lower_snake_case にしてください。");
+        App::Log(s, "エラー: ひな形識別子は64文字以内の半角英小文字・数字・アンダースコアにしてください。先頭に数字、末尾や連続したアンダースコアは使えません。");
         return false;
     }
     auto it = std::find_if(s.project.presets.begin(), s.project.presets.end(),
@@ -136,7 +138,7 @@ static bool RenamePresetId(App::EditorAppState& s, int presetIndex,
                                       (&p != &s.project.presets[presetIndex]);
                            });
     if (it != s.project.presets.end()) {
-        App::Log(s, "エラー: preset_id が重複しています。");
+        App::Log(s, "エラー: ひな形識別子が重複しています。");
         return false;
     }
     for (auto& mapPair : s.project.maps) {
@@ -163,19 +165,74 @@ static bool InstanceIdDuplicated(const MapDocument& map, const std::string& id,
     return false;
 }
 
-static bool DrawOverrideTextField(const std::string& label, OverrideField& field,
-                                 const std::string& inherited) {
+static void DrawFieldLabel(const char* id) {
+    ImGui::TextWrapped("%s", UI::FieldLabel(id));
+}
+
+static bool DrawTextField(const char* id, std::string* value,
+                          ImGuiInputTextFlags flags = ImGuiInputTextFlags_None) {
+    DrawFieldLabel(id);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    return ImGui::InputText((std::string("##") + id).c_str(), value, flags);
+}
+
+static bool DrawNodeTypeCombo(const char* id, std::string& value,
+                              bool allowUnset = false) {
     bool changed = false;
-    ImGui::TextUnformatted(label.c_str());
-    ImGui::SameLine();
-    changed = ImGui::Checkbox(("上書き##" + label).c_str(), &field.overridden);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo((std::string("##") + id).c_str(), UI::NodeTypeLabel(value))) {
+        if (allowUnset && ImGui::Selectable("未設定##empty", value.empty())) {
+            value.clear();
+            changed = true;
+        }
+        for (int i = 0; i < 4; ++i) {
+            if (ImGui::Selectable(UI::kNodeTypeLabels[i], value == UI::kNodeTypeValues[i])) {
+                value = UI::kNodeTypeValues[i];
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
+static bool DrawOverrideToggle(const char* id, OverrideField& field) {
+    const auto& style = ImGui::GetStyle();
+    const float rowWidth = ImGui::CalcTextSize(UI::FieldLabel(id)).x + style.ItemSpacing.x +
+                           ImGui::GetFrameHeight() + style.ItemInnerSpacing.x +
+                           ImGui::CalcTextSize("上書き").x;
+    const bool sameLine = rowWidth <= ImGui::GetContentRegionAvail().x;
+    DrawFieldLabel(id);
+    if (sameLine) ImGui::SameLine();
+    return ImGui::Checkbox("上書き##override", &field.overridden);
+}
+
+static bool DrawOverrideTextField(const char* id, OverrideField& field,
+                                 const std::string& inherited) {
+    ImGui::PushID(id);
+    bool changed = DrawOverrideToggle(id, field);
     if (field.overridden) {
-        if (ImGui::InputText(("##" + label).c_str(), &field.value)) {
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::InputText("##value", &field.value)) {
             changed = true;
         }
     } else {
-        ImGui::TextUnformatted(inherited.empty() ? "(継承)" : inherited.c_str());
+        ImGui::TextWrapped("%s", inherited.empty() ? "（継承）" : inherited.c_str());
     }
+    ImGui::PopID();
+    return changed;
+}
+
+static bool DrawOverrideNodeTypeField(OverrideField& field,
+                                      const std::string& inherited) {
+    ImGui::PushID("node_type");
+    bool changed = DrawOverrideToggle("node_type", field);
+    if (field.overridden) {
+        changed = DrawNodeTypeCombo("value", field.value, true) || changed;
+    } else {
+        ImGui::Text("%s（継承）", UI::NodeTypeLabel(inherited));
+    }
+    ImGui::PopID();
     return changed;
 }
 
@@ -198,39 +255,39 @@ static void DrawLevelInspector(App::EditorAppState& s) {
     bool dirty = false;
 
     std::string beforeId = l->level_id;
-    if (ImGui::InputText("レベルID（level_id）", &l->level_id)) {
+    if (DrawTextField("level_id", &l->level_id)) {
         if (!RenameLevelId(s, s.selectedLevelIndex, beforeId, l->level_id)) {
             l->level_id = beforeId;
         }
         dirty = true;
     }
 
-    if (ImGui::InputText("レベル名（level_name）", &l->level_name)) {
+    if (DrawTextField("level_name", &l->level_name)) {
         dirty = true;
     }
-    ImGui::InputText("マップパス（map_path）", &l->map_path, ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::InputText("次レベル（next_level_id）", &l->next_level_id)) {
+    DrawTextField("map_path", &l->map_path, ImGuiInputTextFlags_ReadOnly);
+    if (DrawTextField("next_level_id", &l->next_level_id)) {
         dirty = true;
     }
-    if (ImGui::InputText("総長（total_length）", &l->total_length)) {
+    if (DrawTextField("total_length", &l->total_length)) {
         dirty = true;
     }
-    if (ImGui::InputText("血管幅 slack（minimum_slack_ratio）", &l->minimum_slack_ratio)) {
+    if (DrawTextField("minimum_slack_ratio", &l->minimum_slack_ratio)) {
         dirty = true;
     }
-    if (ImGui::InputText("背景色（background_color）", &l->background_color)) {
+    if (DrawTextField("background_color", &l->background_color)) {
         dirty = true;
     }
-    if (ImGui::InputText("血管色（vessel_color）", &l->vessel_color)) {
+    if (DrawTextField("vessel_color", &l->vessel_color)) {
         dirty = true;
     }
-    if (ImGui::InputText("base_width", &l->base_width)) {
+    if (DrawTextField("base_width", &l->base_width)) {
         dirty = true;
     }
-    if (ImGui::InputText("tip_width", &l->tip_width)) {
+    if (DrawTextField("tip_width", &l->tip_width)) {
         dirty = true;
     }
-    if (ImGui::InputText("width_variation", &l->width_variation)) {
+    if (DrawTextField("width_variation", &l->width_variation)) {
         dirty = true;
     }
     if (dirty) {
@@ -246,46 +303,41 @@ static void DrawPresetInspector(App::EditorAppState& s) {
     bool dirty = false;
 
     std::string beforeId = p->preset_id;
-    if (ImGui::InputText("ID（preset_id）", &p->preset_id)) {
+    if (DrawTextField("preset_id", &p->preset_id)) {
         if (!RenamePresetId(s, s.selectedPresetIndex, beforeId, p->preset_id)) {
             p->preset_id = beforeId;
         }
         dirty = true;
     }
 
-    const char* types[] = {"root", "follow", "end", "dead"};
-    int currentType = 0;
-    if (p->node_type == "follow") currentType = 1;
-    else if (p->node_type == "end") currentType = 2;
-    else if (p->node_type == "dead") currentType = 3;
-    if (ImGui::Combo("node_type", &currentType, types, 4)) {
-        p->node_type = types[currentType];
+    DrawFieldLabel("node_type");
+    if (DrawNodeTypeCombo("node_type", p->node_type)) {
         dirty = true;
     }
-    if (ImGui::InputText("texture_path", &p->texture_path)) {
+    if (DrawTextField("texture_path", &p->texture_path)) {
         dirty = true;
     }
-    if (ImGui::InputText("width_tiles", &p->width_tiles)) {
+    if (DrawTextField("width_tiles", &p->width_tiles)) {
         dirty = true;
     }
-    if (ImGui::InputText("height_tiles", &p->height_tiles)) {
+    if (DrawTextField("height_tiles", &p->height_tiles)) {
         dirty = true;
     }
-    if (ImGui::InputText("display_name", &p->display_name)) {
+    if (DrawTextField("display_name", &p->display_name)) {
         dirty = true;
     }
-    if (ImGui::InputText("max_incoming", &p->max_incoming)) {
+    if (DrawTextField("max_incoming", &p->max_incoming)) {
         dirty = true;
     }
-    if (ImGui::InputText("max_outgoing", &p->max_outgoing)) {
+    if (DrawTextField("max_outgoing", &p->max_outgoing)) {
         dirty = true;
     }
-    if (ImGui::InputText("max_outgoing_length", &p->max_outgoing_length)) {
+    if (DrawTextField("max_outgoing_length", &p->max_outgoing_length)) {
         dirty = true;
     }
-    if (ImGui::Button("テクスチャを選択")) {
+    if (ImGui::Button("画像を選択##choose_texture")) {
         std::string picked;
-        if (Platform::OpenFileDialog(picked, L"テクスチャ選択", L"Image (*.png;*.jpg;*.jpeg)",
+        if (Platform::OpenFileDialog(picked, L"画像を選択", L"画像 (*.png;*.jpg;*.jpeg)",
                                     L"*.png;*.jpg;*.jpeg")) {
             std::filesystem::path chosen{picked};
             std::string reason;
@@ -299,7 +351,7 @@ static void DrawPresetInspector(App::EditorAppState& s) {
                 p->texture_path = NormalizeRelativePath(rel);
                 dirty = true;
             } else {
-                std::string msg = "貼り付け禁止: " + reason;
+                std::string msg = "画像を選択できません: " + reason;
                 App::Log(s, msg);
             }
         }
@@ -321,17 +373,17 @@ static void DrawMapNodeInspector(App::EditorAppState& s) {
     bool dirty = false;
 
     std::string beforeInstance = node->instance_id;
-    if (ImGui::InputText("instance_id（instance_id）", &node->instance_id)) {
+    if (DrawTextField("instance_id", &node->instance_id)) {
         if (!IsValidId(node->instance_id) ||
             InstanceIdDuplicated(*map, node->instance_id, s.selectedMapNodeIndex)) {
-            App::Log(s, "エラー: instance_id は重複しています。自動で元に戻しました。");
+            App::Log(s, "エラー: ノード識別子の形式が正しくないか、重複しています。元に戻しました。");
             node->instance_id = beforeInstance;
         } else {
             dirty = true;
         }
     }
 
-    if (ImGui::InputText("source_preset_id（source_preset_id）", &node->source_preset_id)) {
+    if (DrawTextField("source_preset_id", &node->source_preset_id)) {
         bool found = false;
         for (const auto& preset : s.project.presets) {
             if (preset.preset_id == node->source_preset_id) {
@@ -340,63 +392,62 @@ static void DrawMapNodeInspector(App::EditorAppState& s) {
             }
         }
         if (!node->source_preset_id.empty() && !found) {
-            App::Log(s, "警告: source_preset_id が見つかりません（保存時に警告になります）。");
+            App::Log(s, "エラー: 指定した識別子のひな形が見つからないため、保存できません。");
         }
         dirty = true;
     }
-    if (DrawOverrideTextField("node_type（node_type）", node->node_type,
-                             resolved.node_type)) {
+    if (DrawOverrideNodeTypeField(node->node_type, resolved.node_type)) {
         dirty = true;
     }
-    if (DrawOverrideTextField("texture_path（texture_path）", node->texture_path,
+    if (DrawOverrideTextField("texture_path", node->texture_path,
                              resolved.texture_path)) {
         dirty = true;
     }
-    if (DrawOverrideTextField("width_tiles（width_tiles）", node->width_tiles,
+    if (DrawOverrideTextField("width_tiles", node->width_tiles,
                              std::to_string(resolved.width_tiles))) {
         dirty = true;
     }
-    if (DrawOverrideTextField("height_tiles（height_tiles）", node->height_tiles,
+    if (DrawOverrideTextField("height_tiles", node->height_tiles,
                              std::to_string(resolved.height_tiles))) {
         dirty = true;
     }
-    if (DrawOverrideTextField("display_name（display_name）", node->display_name,
+    if (DrawOverrideTextField("display_name", node->display_name,
                              resolved.display_name)) {
         dirty = true;
     }
-    if (DrawOverrideTextField("max_incoming（max_incoming）", node->max_incoming,
+    if (DrawOverrideTextField("max_incoming", node->max_incoming,
                              std::to_string(resolved.max_incoming))) {
         dirty = true;
     }
-    if (DrawOverrideTextField("max_outgoing（max_outgoing）", node->max_outgoing,
+    if (DrawOverrideTextField("max_outgoing", node->max_outgoing,
                              std::to_string(resolved.max_outgoing))) {
         dirty = true;
     }
-    if (DrawOverrideTextField("max_outgoing_length（max_outgoing_length）",
+    if (DrawOverrideTextField("max_outgoing_length",
                              node->max_outgoing_length,
                              std::to_string(resolved.max_outgoing_length))) {
         dirty = true;
     }
 
-    bool tileXChanged = ImGui::Checkbox("tile_x 上書き", &node->tile_x.overridden);
+    bool tileXChanged = ImGui::Checkbox("横位置を上書き##override_tile_x", &node->tile_x.overridden);
     if (node->tile_x.overridden) {
-        if (ImGui::InputText("tile_x", &node->tile_x.value)) {
+        if (DrawTextField("tile_x", &node->tile_x.value)) {
             tileXChanged = true;
         }
     } else {
-        ImGui::Text("tile_x = %s", "(継承)");
+        ImGui::TextUnformatted("横位置: （継承）");
     }
-    bool tileYChanged = ImGui::Checkbox("tile_y 上書き", &node->tile_y.overridden);
+    bool tileYChanged = ImGui::Checkbox("縦位置を上書き##override_tile_y", &node->tile_y.overridden);
     if (node->tile_y.overridden) {
-        if (ImGui::InputText("tile_y", &node->tile_y.value)) {
+        if (DrawTextField("tile_y", &node->tile_y.value)) {
             tileYChanged = true;
         }
     } else {
-        ImGui::Text("tile_y = %s", "(継承)");
+        ImGui::TextUnformatted("縦位置: （継承）");
     }
     dirty = dirty || tileXChanged || tileYChanged;
 
-    if (ImGui::Button("配置を解除")) {
+    if (ImGui::Button("配置を解除##clear_placement")) {
         node->tile_x.overridden = true;
         node->tile_y.overridden = true;
         node->tile_x.value.clear();
@@ -415,7 +466,7 @@ static void DrawMapNodeInspector(App::EditorAppState& s) {
 namespace UI {
 
 void DrawInspectorPanel(App::EditorAppState& s) {
-    ImGui::Begin("右: プロパティ",
+    ImGui::Begin(kInspectorWindowTitle,
                  nullptr,
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoCollapse);

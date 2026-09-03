@@ -82,7 +82,8 @@ bool UniqueMapPath(EditorAppState& s, const std::string& id, std::string& result
         if (inMemory) continue;
         const auto status = std::filesystem::symlink_status(resourceRoot / candidate, ec);
         if (ec && ec != std::errc::no_such_file_or_directory) {
-            return EditError(s, "マップの保存先を確認できません: " + ec.message());
+            return EditError(s, "マップの保存先を確認できません（エラー番号: " +
+                                   std::to_string(ec.value()) + "）。");
         }
         ec.clear();
         if (std::filesystem::exists(status)) continue;
@@ -182,13 +183,14 @@ bool EditorApp::CreateLevel(EditorAppState& s, const std::string& id,
         return EditError(s, "先にデータフォルダを開いてください。");
     }
     if (!IsLevelId(id)) {
-        return EditError(s, "level_id は64文字以内の lower_snake_case で入力してください。");
+        return EditError(s, "レベル識別子は英小文字で始め、英小文字・数字・アンダースコアを使って64文字以内で入力してください。末尾や連続したアンダースコアは使用できません。");
     }
-    if (name.empty()) return EditError(s, "level_name を入力してください。");
+    if (name.empty()) return EditError(s, "レベル名を入力してください。");
     LevelRow level;
     level.level_id = UniqueLevelId(s.project, id);
-    if (level.level_id.empty()) return EditError(s, "使用できるレベルIDが見つかりません。");
+    if (level.level_id.empty()) return EditError(s, "使用できるレベル識別子が見つかりません。");
     level.level_name = name;
+    level.total_length = "50";
     return AppendDraftLevel(s, std::move(level), {});
 }
 
@@ -201,7 +203,7 @@ bool EditorApp::DuplicateSelectedLevel(EditorAppState& s) {
     LevelRow level = s.project.levels[s.selectedLevelIndex];
     MapDocument map = *sourceMap;
     level.level_id = UniqueLevelId(s.project, WithSuffix(level.level_id, "_copy"));
-    if (level.level_id.empty()) return EditError(s, "使用できるレベルIDが見つかりません。");
+    if (level.level_id.empty()) return EditError(s, "使用できるレベル識別子が見つかりません。");
     return AppendDraftLevel(s, std::move(level), std::move(map));
 }
 
@@ -252,7 +254,7 @@ bool EditorApp::PlaceNode(EditorAppState& s, int tileX, int tileY) {
             break;
         }
     }
-    if (node.instance_id.empty()) return EditError(s, "使用できるノードIDが見つかりません。");
+    if (node.instance_id.empty()) return EditError(s, "使用できるノード識別子が見つかりません。");
     node.tile_x = {true, std::to_string(tileX)};
     node.tile_y = {true, std::to_string(tileY)};
     map->nodes.push_back(std::move(node));

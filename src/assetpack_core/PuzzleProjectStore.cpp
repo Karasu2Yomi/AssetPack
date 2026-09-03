@@ -22,6 +22,11 @@ namespace {
 
 using namespace AssetPackCore;
 
+class ProjectStoreError final : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 constexpr std::array<std::string_view, 11> kLevelsHeader{
     "level_id", "level_name", "map_path", "next_level_id", "total_length",
     "minimum_slack_ratio", "background_color", "vessel_color", "base_width",
@@ -53,6 +58,22 @@ bool AnyError(const std::vector<ProjectIssue>& issues) {
         }
     }
     return false;
+}
+
+std::string ErrorCodeMessage(const std::string& context, const std::error_code& error) {
+    return context + "（エラーコード: " + std::to_string(error.value()) + "）";
+}
+
+std::string FilesystemErrorMessage(const std::string& context,
+                                   const std::filesystem::filesystem_error& error) {
+    std::string message = ErrorCodeMessage(context, error.code());
+    if (!error.path1().empty()) {
+        message += " 対象パス: " + error.path1().generic_string();
+    }
+    if (!error.path2().empty()) {
+        message += " 関連パス: " + error.path2().generic_string();
+    }
+    return message;
 }
 
 std::string NormalizePathForCsv(std::string text) {
@@ -129,7 +150,7 @@ bool EqualHeader(const std::vector<std::string>& header,
     if (!EqualHeader(header, std::vector<std::string_view>{expected.begin(),
                                                            expected.end()})) {
         AddIssue(issues, file, line, "header", IssueSeverity::Error,
-                 "header must be fixed field order");
+                 "ヘッダーの項目と並び順が規定の形式と一致しません。");
         return false;
     }
     return true;
@@ -203,19 +224,19 @@ bool ValidateRelativePathOnly(const std::string& text, const std::string& file,
                              std::vector<ProjectIssue>& issues) {
     if (text.empty()) {
         AddIssue(issues, file, line, field, IssueSeverity::Error,
-                 "path is required");
+                 "パスを指定してください。");
         return false;
     }
     if (HasPathViolation(std::filesystem::path{text}, true)) {
         AddIssue(issues, file, line, field, IssueSeverity::Error,
-                 "path must be non-empty, single-line, and relative");
+                 "パスは空欄にせず、改行を含まない相対パスで指定してください。");
         return false;
     }
     const auto rel = std::filesystem::path{NormalizePathForCsv(text)};
     for (const auto& part : rel) {
         if (part.empty() || part == "." || part == "..") {
             AddIssue(issues, file, line, field, IssueSeverity::Error,
-                     "path must remain within resource root");
+                     "パスはリソースフォルダー内を参照する必要があります。");
             return false;
         }
     }
@@ -230,7 +251,7 @@ bool ValidateAndParseLevel(const CsvRecord& row, const std::filesystem::path& da
                           std::vector<ProjectIssue>& issues) {
     if (row.fields.size() != kLevelsHeader.size()) {
         AddIssue(issues, "levels.csv", static_cast<int>(row.lineNumber), {},
-                 IssueSeverity::Error, "record field count mismatch");
+                 IssueSeverity::Error, "行の項目数が規定の形式と一致しません。");
         return false;
     }
     LevelRow level;
@@ -249,14 +270,14 @@ bool ValidateAndParseLevel(const CsvRecord& row, const std::filesystem::path& da
 
     if (!IsValidIdentifier(level.level_id)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "level_id",
-                 IssueSeverity::Error, "ID must be lower_snake_case");
+                 IssueSeverity::Error, "識別子は英小文字で始まる英小文字・数字・アンダースコアのみで、64文字以内にしてください。アンダースコアの連続や末尾での使用はできません。");
     } else if (!levelIds.insert(level.level_id).second) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "level_id",
-                 IssueSeverity::Error, "duplicate level_id");
+                 IssueSeverity::Error, "レベル識別子が重複しています。");
     }
     if (level.level_name.empty()) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "level_name",
-                 IssueSeverity::Error, "level_name is required");
+                 IssueSeverity::Error, "レベル名を入力してください。");
     }
     if (ValidateRelativePathOnly(level.map_path, "levels.csv",
                                 static_cast<int>(level.line), "map_path", issues)) {
@@ -265,7 +286,7 @@ bool ValidateAndParseLevel(const CsvRecord& row, const std::filesystem::path& da
         if (!IsInside(mapAbs, dataRoot)) {
             AddIssue(issues, "levels.csv", static_cast<int>(level.line), "map_path",
                      IssueSeverity::Error,
-                     "map_path must resolve inside selected data folder");
+                     "マップのパスは選択したデータフォルダー内を参照する必要があります。");
         }
         if (mapOrder.end() == std::find(mapOrder.begin(), mapOrder.end(),
                                         level.map_path)) {
@@ -275,38 +296,38 @@ bool ValidateAndParseLevel(const CsvRecord& row, const std::filesystem::path& da
     if (!level.next_level_id.empty() && !IsValidIdentifier(level.next_level_id)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "next_level_id",
                  IssueSeverity::Warning,
-                 "next_level_id is not in lower_snake_case");
+                 "次のレベルの識別子の形式が正しくありません。英小文字で始まる英小文字・数字・アンダースコアのみで、64文字以内にしてください。アンダースコアの連続や末尾での使用はできません。");
     }
     float parsed = 0.0f;
     if (!ParseFloat(level.total_length, parsed, true)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "total_length",
-                 IssueSeverity::Error, "must be non-negative decimal");
+                 IssueSeverity::Error, "0以上の数値を入力してください。");
     }
     if (!ParseFloat(level.minimum_slack_ratio, parsed, true)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line),
                  "minimum_slack_ratio", IssueSeverity::Error,
-                 "must be non-negative decimal");
+                 "0以上の数値を入力してください。");
     }
     if (!ParseFloat(level.base_width, parsed, true)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "base_width",
-                 IssueSeverity::Error, "must be non-negative decimal");
+                 IssueSeverity::Error, "0以上の数値を入力してください。");
     }
     if (!ParseFloat(level.tip_width, parsed, true)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "tip_width",
-                 IssueSeverity::Error, "must be non-negative decimal");
+                 IssueSeverity::Error, "0以上の数値を入力してください。");
     }
     if (!ParseFloat(level.width_variation, parsed, true)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "width_variation",
-                 IssueSeverity::Error, "must be non-negative decimal");
+                 IssueSeverity::Error, "0以上の数値を入力してください。");
     }
     if (!ValidateColor(level.background_color)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line),
                  "background_color", IssueSeverity::Error,
-                 "expected #RRGGBB or #RRGGBBAA, or blank");
+                 "色は #RRGGBB または #RRGGBBAA 形式で指定するか、空欄にしてください。");
     }
     if (!ValidateColor(level.vessel_color)) {
         AddIssue(issues, "levels.csv", static_cast<int>(level.line), "vessel_color",
-                 IssueSeverity::Error, "expected #RRGGBB or #RRGGBBAA, or blank");
+                 IssueSeverity::Error, "色は #RRGGBB または #RRGGBBAA 形式で指定するか、空欄にしてください。");
     }
 
     out.push_back(std::move(level));
@@ -320,7 +341,7 @@ bool ValidateAndParsePreset(const CsvRecord& row,
                            std::vector<ProjectIssue>& issues) {
     if (row.fields.size() != kNodePresetsHeader.size()) {
         AddIssue(issues, "nodes.csv", static_cast<int>(row.lineNumber), {},
-                 IssueSeverity::Error, "record field count mismatch");
+                 IssueSeverity::Error, "行の項目数が規定の形式と一致しません。");
         return false;
     }
 
@@ -338,14 +359,14 @@ bool ValidateAndParsePreset(const CsvRecord& row,
 
     if (!IsValidIdentifier(preset.preset_id)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "preset_id",
-                 IssueSeverity::Error, "ID must be lower_snake_case");
+                 IssueSeverity::Error, "識別子は英小文字で始まる英小文字・数字・アンダースコアのみで、64文字以内にしてください。アンダースコアの連続や末尾での使用はできません。");
     } else if (!presetIds.insert(preset.preset_id).second) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "preset_id",
-                 IssueSeverity::Error, "duplicate preset_id");
+                 IssueSeverity::Error, "ひな形の識別子が重複しています。");
     }
     if (!IsValidNodeType(preset.node_type)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "node_type",
-                 IssueSeverity::Error, "expected root/follow/end/dead");
+                 IssueSeverity::Error, "ノード種別には「始点」「中継点」「終点」「障害物」のいずれかを指定してください。");
     }
     if (!preset.texture_path.empty()) {
         ValidateRelativePathOnly(preset.texture_path, "nodes.csv",
@@ -355,31 +376,31 @@ bool ValidateAndParsePreset(const CsvRecord& row,
         if (!std::filesystem::is_regular_file(tex)) {
             AddIssue(issues, "nodes.csv", static_cast<int>(preset.line),
                      "texture_path", IssueSeverity::Warning,
-                     "referenced file does not exist");
+                     "参照先のファイルが見つかりません。");
         }
     }
     std::uint32_t u32 = 0;
     float f = 0.0f;
     if (!preset.width_tiles.empty() && !ParseUnsigned(preset.width_tiles, u32)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "width_tiles",
-                 IssueSeverity::Error, "must be non-negative integer");
+                 IssueSeverity::Error, "0以上の整数を入力してください。");
     }
     if (!preset.height_tiles.empty() && !ParseUnsigned(preset.height_tiles, u32)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "height_tiles",
-                 IssueSeverity::Error, "must be non-negative integer");
+                 IssueSeverity::Error, "0以上の整数を入力してください。");
     }
     if (!preset.max_incoming.empty() && !ParseUnsigned(preset.max_incoming, u32)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "max_incoming",
-                 IssueSeverity::Error, "must be non-negative integer");
+                 IssueSeverity::Error, "0以上の整数を入力してください。");
     }
     if (!preset.max_outgoing.empty() && !ParseUnsigned(preset.max_outgoing, u32)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line), "max_outgoing",
-                 IssueSeverity::Error, "must be non-negative integer");
+                 IssueSeverity::Error, "0以上の整数を入力してください。");
     }
     if (!ParseFloat(preset.max_outgoing_length, f, true)) {
         AddIssue(issues, "nodes.csv", static_cast<int>(preset.line),
                  "max_outgoing_length", IssueSeverity::Error,
-                 "must be non-negative decimal");
+                 "0以上の数値を入力してください。");
     }
 
     out.push_back(std::move(preset));
@@ -393,7 +414,7 @@ bool ValidateAndParseMapNode(const CsvRecord& row,
                             std::vector<ProjectIssue>& issues) {
     if (row.fields.size() != kMapHeader.size()) {
         AddIssue(issues, map.map_path, static_cast<int>(row.lineNumber), {},
-                 IssueSeverity::Error, "record field count mismatch");
+                 IssueSeverity::Error, "行の項目数が規定の形式と一致しません。");
         return false;
     }
 
@@ -415,21 +436,21 @@ bool ValidateAndParseMapNode(const CsvRecord& row,
 
     if (!IsValidIdentifier(node.instance_id)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "instance_id",
-                 IssueSeverity::Error, "ID must be lower_snake_case");
+                 IssueSeverity::Error, "識別子は英小文字で始まる英小文字・数字・アンダースコアのみで、64文字以内にしてください。アンダースコアの連続や末尾での使用はできません。");
     }
     const bool hasPreset = !node.source_preset_id.empty();
     if (!hasPreset && !node.node_type.overridden) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "node_type",
                  IssueSeverity::Error,
-                 "node_type is required when source_preset_id is empty");
+                 "参照するひな形が未指定の場合は、ノード種別を指定してください。");
     }
     if (hasPreset && !presetIds.count(node.source_preset_id)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line),
-                 "source_preset_id", IssueSeverity::Error, "unknown source_preset_id");
+                 "source_preset_id", IssueSeverity::Error, "参照するひな形の識別子が見つかりません。");
     }
     if (node.node_type.overridden && !IsValidNodeType(node.node_type.value)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "node_type",
-                 IssueSeverity::Error, "expected root/follow/end/dead");
+                 IssueSeverity::Error, "ノード種別には「始点」「中継点」「終点」「障害物」のいずれかを指定してください。");
     }
     if (node.texture_path.overridden && !ValidateRelativePathOnly(
                                         node.texture_path.value, map.map_path,
@@ -442,7 +463,7 @@ bool ValidateAndParseMapNode(const CsvRecord& row,
         if (!std::filesystem::is_regular_file(tex)) {
             AddIssue(issues, map.map_path, static_cast<int>(node.line),
                      "texture_path", IssueSeverity::Warning,
-                     "referenced file does not exist");
+                     "参照先のファイルが見つかりません。");
         }
     }
 
@@ -451,42 +472,42 @@ bool ValidateAndParseMapNode(const CsvRecord& row,
     float f = 0.0f;
     if (node.width_tiles.overridden && !ParseUnsigned(node.width_tiles.value, u32)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "width_tiles",
-                 IssueSeverity::Error, "must be non-negative integer");
+                 IssueSeverity::Error, "0以上の整数を入力してください。");
     }
     if (node.height_tiles.overridden && !ParseUnsigned(node.height_tiles.value, u32)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "height_tiles",
-                 IssueSeverity::Error, "must be non-negative integer");
+                 IssueSeverity::Error, "0以上の整数を入力してください。");
     }
     if (node.max_incoming.overridden &&
         !ParseUnsigned(node.max_incoming.value, u32)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line),
                  "max_incoming", IssueSeverity::Error,
-                 "must be non-negative integer");
+                 "0以上の整数を入力してください。");
     }
     if (node.max_outgoing.overridden &&
         !ParseUnsigned(node.max_outgoing.value, u32)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line),
                  "max_outgoing", IssueSeverity::Error,
-                 "must be non-negative integer");
+                 "0以上の整数を入力してください。");
     }
     if (node.max_outgoing_length.overridden &&
         !ParseFloat(node.max_outgoing_length.value, f, true)) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line),
                  "max_outgoing_length", IssueSeverity::Error,
-                 "must be non-negative decimal");
+                 "0以上の数値を入力してください。");
     }
     if (node.tile_x.overridden != node.tile_y.overridden) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "tile_x",
-                 IssueSeverity::Error, "tile_x and tile_y must be both empty or both set");
+                 IssueSeverity::Error, "タイルの横位置と縦位置は、両方を空欄にするか、両方に値を入力してください。");
     }
     if (node.tile_x.overridden &&
         (!ParseUnsigned(node.tile_x.value, i32) || !ParseUnsigned(node.tile_y.value, i32))) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "tile_x",
-                 IssueSeverity::Error, "tile_x/tile_y must be non-negative integers");
+                 IssueSeverity::Error, "タイルの横位置と縦位置には、0以上の整数を入力してください。");
     }
     if (node.display_name.overridden && node.display_name.value.empty()) {
         AddIssue(issues, map.map_path, static_cast<int>(node.line), "display_name",
-                 IssueSeverity::Error, "display_name cannot be empty when override");
+                 IssueSeverity::Error, "表示名を上書きする場合は、空欄にできません。");
     }
     map.nodes.push_back(std::move(node));
     return true;
@@ -582,7 +603,7 @@ bool ParseAndValidateCurrentProject(const PuzzleProject& project,
         if (map == project.maps.end() || map->second.deleted) {
             AddIssue(issues, "levels.csv", static_cast<int>(level.line), "map_path",
                      IssueSeverity::Error,
-                     "referenced map document is missing from the project");
+                     "参照先のマップデータがプロジェクト内にありません。");
         }
     }
 
@@ -591,29 +612,29 @@ bool ParseAndValidateCurrentProject(const PuzzleProject& project,
         if (map.deleted) continue;
         if (mapPair.first != map.map_path) {
             AddIssue(issues, mapPair.first, -1, "map_path", IssueSeverity::Error,
-                     "map document path does not match its project key");
+                     "マップデータのパスがプロジェクトに登録されたパスと一致しません。");
         }
         if (mapPair.first.empty()) {
             AddIssue(issues, mapPair.first, -1, "map_path", IssueSeverity::Error,
-                     "map_path is required");
+                     "マップのパスを指定してください。");
         } else if (ValidateRelativePathOnly(mapPair.first, mapPair.first, -1,
                                            "map_path", issues)) {
             const auto mapAbs = project.resourceRoot / mapPair.first;
             if (!IsInside(mapAbs, project.dataRoot)) {
                 AddIssue(issues, mapPair.first, -1, "map_path", IssueSeverity::Error,
-                         "map_path must resolve inside selected data folder");
+                         "マップのパスは選択したデータフォルダー内を参照する必要があります。");
             }
             std::error_code ec;
             const bool exists = PathEntryExists(mapAbs, ec);
             if (ec) {
                 AddIssue(issues, mapPair.first, -1, "map_path", IssueSeverity::Error,
-                         "cannot inspect map destination: " + ec.message());
+                         ErrorCodeMessage("マップの保存先を確認できません。", ec));
             } else if (exists && map.state != MapDocumentState::Persisted) {
                 AddIssue(issues, mapPair.first, -1, "map_path", IssueSeverity::Error,
-                         "draft map destination already exists; refusing to overwrite it");
+                         "下書きマップの保存先に既存のファイルがあるため、上書きできません。");
             } else if (exists && !std::filesystem::is_regular_file(mapAbs, ec)) {
                 AddIssue(issues, mapPair.first, -1, "map_path", IssueSeverity::Error,
-                         "map destination is not a readable regular file");
+                         "マップの保存先が読み取り可能な通常のファイルではありません。");
             }
         }
         CsvDocument mapDoc;
@@ -628,7 +649,7 @@ bool ParseAndValidateCurrentProject(const PuzzleProject& project,
                 if (!instanceIds.insert(tmp.nodes.back().instance_id).second) {
                     AddIssue(issues, mapPair.first, static_cast<int>(tmp.nodes.back().line),
                              "instance_id", IssueSeverity::Error,
-                             "instance_id duplicated in map");
+                             "マップ内でノードの識別子が重複しています。");
                 }
             }
         }
@@ -679,6 +700,25 @@ bool ReplaceWrittenFiles(const std::vector<std::filesystem::path>& targets,
     };
     std::vector<Replacement> replacements;
     replacements.reserve(targets.size());
+    const auto restoreAfterFailure = [&](const std::filesystem::path& target,
+                                         const std::string& message) {
+        AddIssue(issues, target.generic_string(), -1, "", IssueSeverity::Error, message);
+        for (auto it = replacements.rbegin(); it != replacements.rend(); ++it) {
+            if (!it->changed) continue;
+            std::error_code ec;
+            if (it->existed) {
+                std::filesystem::copy_file(it->backup, it->target,
+                                          std::filesystem::copy_options::overwrite_existing, ec);
+            } else {
+                std::filesystem::remove(it->target, ec);
+            }
+            if (ec) {
+                AddIssue(issues, it->target.generic_string(), -1, "", IssueSeverity::Error,
+                         ErrorCodeMessage("保存に失敗した後、ファイルを復元できませんでした。", ec));
+            }
+        }
+        RemoveTempFiles(tempFiles);
+    };
     for (std::size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         const auto& temp = tempFiles[i];
@@ -687,13 +727,13 @@ bool ReplaceWrittenFiles(const std::vector<std::filesystem::path>& targets,
             std::error_code ec;
             const bool existed = PathEntryExists(target, ec);
             if (ec) {
-                throw std::filesystem::filesystem_error("cannot inspect save target", target, ec);
+                throw std::filesystem::filesystem_error("保存先を確認できません。", target, ec);
             }
             if (existed && !allowOverwrite[i]) {
-                throw std::runtime_error("draft map destination already exists; refusing to overwrite it");
+                throw ProjectStoreError("下書きマップの保存先に既存のファイルがあるため、上書きできません。");
             }
             if (existed && !std::filesystem::is_regular_file(target)) {
-                throw std::runtime_error("save target is not a regular file");
+                throw ProjectStoreError("保存先が通常のファイルではありません。");
             }
             if (existed) {
                 std::filesystem::copy_file(target, bak,
@@ -709,24 +749,14 @@ bool ReplaceWrittenFiles(const std::vector<std::filesystem::path>& targets,
             }
             std::filesystem::rename(temp, target);
             replacement.changed = true;
-        } catch (const std::exception& ex) {
-            AddIssue(issues, target.generic_string(), -1, "", IssueSeverity::Error,
-                     ex.what());
-            for (auto it = replacements.rbegin(); it != replacements.rend(); ++it) {
-                if (!it->changed) continue;
-                std::error_code ec;
-                if (it->existed) {
-                    std::filesystem::copy_file(it->backup, it->target,
-                                              std::filesystem::copy_options::overwrite_existing, ec);
-                } else {
-                    std::filesystem::remove(it->target, ec);
-                }
-                if (ec) {
-                    AddIssue(issues, it->target.generic_string(), -1, "", IssueSeverity::Error,
-                             "cannot restore file after failed save: " + ec.message());
-                }
-            }
-            RemoveTempFiles(tempFiles);
+        } catch (const std::filesystem::filesystem_error& ex) {
+            restoreAfterFailure(target, FilesystemErrorMessage("ファイルを保存できません。", ex));
+            return false;
+        } catch (const ProjectStoreError& ex) {
+            restoreAfterFailure(target, ex.what());
+            return false;
+        } catch (const std::exception&) {
+            restoreAfterFailure(target, "ファイルの保存中に予期しないエラーが発生しました。");
             return false;
         }
     }
@@ -744,7 +774,7 @@ bool PuzzleProjectStore::LoadDataFolder(
     issues.clear();
     if (!std::filesystem::is_directory(selectedDataFolder)) {
         AddIssue(issues, selectedDataFolder.generic_string(), -1, "",
-                 IssueSeverity::Error, "data folder not found");
+                 IssueSeverity::Error, "データフォルダーが見つかりません。");
         return false;
     }
 
@@ -755,7 +785,7 @@ bool PuzzleProjectStore::LoadDataFolder(
     if (!std::filesystem::is_regular_file(levelsPath) ||
         !std::filesystem::is_regular_file(nodesPath)) {
         AddIssue(issues, "levels.csv", 1, "", IssueSeverity::Error,
-                 "levels.csv or nodes.csv missing");
+                 "levels.csv または nodes.csv が見つかりません。");
         return false;
     }
 
@@ -763,12 +793,12 @@ bool PuzzleProjectStore::LoadDataFolder(
     std::string nodesText;
     if (!LoadText(levelsPath, levelsText)) {
         AddIssue(issues, "levels.csv", -1, "", IssueSeverity::Error,
-                 "cannot read levels.csv");
+                 "levels.csv を読み込めません。");
         return false;
     }
     if (!LoadText(nodesPath, nodesText)) {
         AddIssue(issues, "nodes.csv", -1, "", IssueSeverity::Error,
-                 "cannot read nodes.csv");
+                 "nodes.csv を読み込めません。");
         return false;
     }
 
@@ -776,12 +806,12 @@ bool PuzzleProjectStore::LoadDataFolder(
     CsvParseResult nodesResult = CsvCodec::Parse(nodesText);
     if (!levelsResult) {
         AddIssue(issues, "levels.csv", 1, "", IssueSeverity::Error,
-                 "parse error: " + levelsResult.error);
+                 "解析エラー: " + levelsResult.error);
         return false;
     }
     if (!nodesResult) {
         AddIssue(issues, "nodes.csv", 1, "", IssueSeverity::Error,
-                 "parse error: " + nodesResult.error);
+                 "解析エラー: " + nodesResult.error);
         return false;
     }
 
@@ -822,7 +852,7 @@ bool PuzzleProjectStore::LoadDataFolder(
         const bool exists = PathEntryExists(mapAbs, ec);
         if (ec) {
             AddIssue(issues, mapPath, -1, "map_path", IssueSeverity::Error,
-                     "cannot inspect map file: " + ec.message());
+                     ErrorCodeMessage("マップファイルを確認できません。", ec));
             continue;
         }
         if (!exists) {
@@ -833,24 +863,24 @@ bool PuzzleProjectStore::LoadDataFolder(
             next.maps.emplace(mapPath, std::move(mapDoc));
             next.mapLoadOrder.push_back(mapPath);
             AddIssue(issues, mapPath, -1, "map_path", IssueSeverity::Warning,
-                     "map file missing; opened an editable draft that will be created on Save All");
+                     "マップファイルが見つからないため、編集可能な下書きを開きました。「すべて保存」でファイルを作成します。");
             continue;
         }
         if (!std::filesystem::is_regular_file(mapAbs, ec)) {
             AddIssue(issues, mapPath, -1, "map_path", IssueSeverity::Error,
-                     "map path is not a readable regular file");
+                     "マップのパスが読み取り可能な通常のファイルではありません。");
             continue;
         }
         std::string mapText;
         if (!LoadText(mapAbs, mapText)) {
             AddIssue(issues, mapPath, -1, "map_path", IssueSeverity::Error,
-                     "cannot read map file");
+                     "マップファイルを読み込めません。");
             continue;
         }
         CsvParseResult mapResult = CsvCodec::Parse(mapText);
         if (!mapResult) {
             AddIssue(issues, mapPath, -1, "", IssueSeverity::Error,
-                     "parse error: " + mapResult.error);
+                     "解析エラー: " + mapResult.error);
             continue;
         }
         MapDocument mapDoc;
@@ -875,9 +905,17 @@ bool PuzzleProjectStore::LoadDataFolder(
     next.presetsDirty = false;
     project = std::move(next);
     return true;
-} catch (const std::exception& ex) {
+} catch (const std::filesystem::filesystem_error& ex) {
+    AddIssue(issues, selectedDataFolder.generic_string(), -1, "", IssueSeverity::Error,
+             FilesystemErrorMessage("データフォルダーの読み込み中にファイル操作に失敗しました。", ex));
+    return false;
+} catch (const ProjectStoreError& ex) {
     AddIssue(issues, selectedDataFolder.generic_string(), -1, "", IssueSeverity::Error,
              ex.what());
+    return false;
+} catch (const std::exception&) {
+    AddIssue(issues, selectedDataFolder.generic_string(), -1, "", IssueSeverity::Error,
+             "データフォルダーの読み込み中に予期しないエラーが発生しました。");
     return false;
 }
 
@@ -887,7 +925,7 @@ bool PuzzleProjectStore::SaveAll(PuzzleProject& project,
     if (project.dataRoot.empty() || project.resourceRoot.empty() ||
         project.levelsPath.empty() || project.nodesPath.empty()) {
         AddIssue(issues, "levels.csv", -1, "", IssueSeverity::Error,
-                 "open a data folder before saving");
+                 "保存する前にデータフォルダーを開いてください。");
         return false;
     }
     if (!ParseAndValidateCurrentProject(project, issues)) {
@@ -939,7 +977,7 @@ bool PuzzleProjectStore::SaveAll(PuzzleProject& project,
 #endif
             if (!savePaths.insert(path).second) {
                 AddIssue(issues, target.generic_string(), -1, "map_path", IssueSeverity::Error,
-                         "save file paths overlap another CSV or its temporary/backup file");
+                         "保存先のパスが他のCSVファイル、またはその一時ファイルやバックアップファイルと重複しています。");
                 return false;
             }
         }
@@ -952,7 +990,7 @@ bool PuzzleProjectStore::SaveAll(PuzzleProject& project,
         const auto& text = tempTexts[i];
         if (!WriteTextAtomic(target, text)) {
             AddIssue(issues, target.generic_string(), -1, "", IssueSeverity::Error,
-                     "cannot write temp file");
+                     "一時ファイルに書き込めません。");
             RemoveTempFiles(tempFiles);
             return false;
         }
@@ -971,9 +1009,17 @@ bool PuzzleProjectStore::SaveAll(PuzzleProject& project,
         mapPair.second.dirty = false;
     }
     return true;
-} catch (const std::exception& ex) {
+} catch (const std::filesystem::filesystem_error& ex) {
+    AddIssue(issues, project.dataRoot.generic_string(), -1, "", IssueSeverity::Error,
+             FilesystemErrorMessage("プロジェクトの保存中にファイル操作に失敗しました。", ex));
+    return false;
+} catch (const ProjectStoreError& ex) {
     AddIssue(issues, project.dataRoot.generic_string(), -1, "", IssueSeverity::Error,
              ex.what());
+    return false;
+} catch (const std::exception&) {
+    AddIssue(issues, project.dataRoot.generic_string(), -1, "", IssueSeverity::Error,
+             "プロジェクトの保存中に予期しないエラーが発生しました。");
     return false;
 }
 
