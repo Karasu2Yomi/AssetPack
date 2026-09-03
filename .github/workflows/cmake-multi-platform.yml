@@ -79,7 +79,7 @@ jobs:
         run: |
           set -e
 
-          EXE="build/bin/AssetPack-LUO_JIEWEN.exe"
+          EXE="build/bin/AssetPack.exe"
           if [ ! -f "$EXE" ]; then
             echo "ERROR: $EXE not found"
             exit 1
@@ -131,7 +131,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AssetPack-LUO_JIEWEN-${{ matrix.build_type }}
+          name: AssetPack-${{ matrix.build_type }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14
@@ -144,7 +144,7 @@ jobs:
         if: matrix.build_type == 'Release' && startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
-          $zipName = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
+          $zipName = "AssetPack-${{ github.ref_name }}-win64-mingw.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path dist\* -DestinationPath $zipName -Force
           Write-Host "Created: $zipName"
@@ -156,7 +156,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $asset = "AssetPack-LUO_JIEWEN-${{ github.ref_name }}-win64-mingw.zip"
+          $asset = "AssetPack-${{ github.ref_name }}-win64-mingw.zip"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
@@ -180,7 +180,7 @@ jobs:
           <?xml version="1.0"?>
           <package>
             <metadata>
-              <id>AssetPack.LUO_JIEWEN</id>
+              <id>AssetPack</id>
               <version>0.0.0</version>
               <authors>${{ github.repository_owner }}</authors>
               <owners>${{ github.repository_owner }}</owners>

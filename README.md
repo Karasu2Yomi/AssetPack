@@ -1,219 +1,54 @@
+# AssetPack（Puzzle Editor）
 
+Object_Connect の `levels.csv` / `nodes.csv` / map csv を編集するための
+Windows 向けエディタ。
 
-# AssetPack（Tilemap Editor / Exporter）
+## 目的
 
-![](doc/GUI.png)
+- TileMap JSON/BIN/Diff 機能を廃止
+- 日本語 UI で `levels`、`nodes`、map ノードを編集
+- `data/levels.csv` で複数の `data/maps/<level>.csv` を管理
+- 手動 SaveAll（`Ctrl+S`）のみ
 
-## 背景・目的
+## 起動データ
 
-ゲーム開発の現場では、レベルデータやアセット（tileset・マップ・当たり判定など）を「編集しやすい形式（人間向け）」で管理しつつ、実行時には「読み込みが速く壊れにくい形式（機械向け）」へ変換して利用します。
-本ツールは、**タイルマップの編集・検証（Validate）・バイナリ出力（Export）・再読込（Import）・差分確認（Diff/Preview）**を1つの exe にまとめ、**アセットパイプラインの最小構成**を実演するために作成しました。
+起動後、左パネルの「データフォルダを開く」から
+`levels.csv` と `nodes.csv` を持つ `data` フォルダを選択。
 
-特に以下を重視しています。
+- `resourceRoot = data.parent_path()`
+- `levelsPath = data/levels.csv`
+- `nodesPath = data/nodes.csv`
+- map 参照は `map_path`（resourceRoot からの相対）
 
-* **再現性**：プロジェクト配下の相対パスで管理し、環境依存を減らす
-* **検証可能性**：Exportした bin をツール自身が再読込し、見た目・データ差分で確認できる
-* **責務分離**：UI / アプリ状態 / ドメインモデル / パイプライン（I/O, Validate, Diff）を分離
+## マップの編集と保存
 
----
+- 新規・複製レベルのマップはメモリ上の下書きとして作成。保存前でも編集でき、
+  `Save All` または `Ctrl+S` を実行するまでファイルやマップ用フォルダは作成しない。
+- レベルを選択 → ノードひな形を選択 →「マップへ追加」→ キャンバスをクリックして配置。
+  ひな形を選択しても現在のレベルとキャンバスは維持される。
+- 既存レベルは `map_path` のファイルを読み込む。ファイルが見つからない場合は
+  警告付きの空の修復用下書きを開き、保存時にそのパスへ作成する。
+  存在するファイルの読み取り・CSV 形式エラーは空のマップに置き換えない。
+- 保存失敗時は編集内容を保持する。下書きの保存先に別のファイルが出現した場合は
+  上書きせず、問題一覧に競合を表示する。
+- `data` 以外の名前のフォルダを開いた場合も、そのフォルダ内の `maps/` を使用する。
 
-## 主な機能
+## コア構成
 
-* **タイルマップ編集（基本）**
+- `assetpack_core`
+  - `CsvCodec`：CSV parse / serialize（RFC 4180, CRLF）
+  - `PuzzleProjectStore`：LoadDataFolder / SaveAll
+  - `PuzzleResolver`：preset 継承解決
+  - `Model`：`PuzzleProject / LevelRow / NodePresetRow / MapNodeRow`
 
-    * レイヤー（例：Ground / Collision）を保持
-    * タイルID（tileId）の選択（Brush）
-* **Validate（検証）**
-
-    * タイルIDが tileset 範囲外か
-    * レイヤーデータサイズが `width*height` と一致するか など
-* **Export（JSON → BIN）**
-
-    * 実行時向けの簡易バイナリ形式で出力
-* **Import（BIN → Tool）**
-
-    * 出力した bin を読み込み、ツール側で復元
-* **Diff（JSON vs BIN）**
-
-    * JSON側とBIN側の差分セルを一覧表示
-* **Viewport表示**
-
-    * JSONプレビュー / BINプレビュー（Split）
-    * tileset 画像プレビュー（簡易）
-    * Brush の選択タイルを Viewport 上にオーバーレイ表示（任意）
-
----
-
-## 使い方（基本操作）
-
-### 1. 起動
-
-`AssetPack.exe` を実行します。
-
-### 2. JSONの読み込み
-
-* `Maps (JSON)` のパスに対象JSONを指定し、`Load JSON` を押します。
-
-### 3. Validate
-
-* `Validate` タブで `Run Validate` を押すと、Error/Warning が一覧表示されます。
-* Error がある場合は Export をキャンセルします（安全側）。
-
-### 4. Export（JSON → BIN）
-
-* `Export/Import` タブで `Export BIN` を押します。
-* `Build (BIN)` のパスへ `*.bin` が生成されます。
-
-### 5. Import（BIN → Tool）と Diff
-
-* `Import BIN` で bin を読み込みます。
-* `Round-trip Diff (JSON vs BIN)` を押すと差分が表示されます。
-
-    * 差分が 0 なら、Export結果がツール上で再現できていることを確認できます。
-
----
-
-## テスト用JSON
-
-```json
-{
-  "version": 1,
-  "map": {
-    "name": "stage_test_01",
-    "width": 16,
-    "height": 9,
-    "tileSize": 64
-  },
-  "tileset": {
-    "image": "tilesets/basic.png",
-    "tileWidth": 2,
-    "tileHeight": 2,
-    "columns": 2,
-    "count": 4
-  },
-  "layers": [
-    {
-      "name": "Ground",
-      "type": "Tile",
-      "visible": true,
-      "data": [
-        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-        1,0,2,2,2,0,0,3,3,3,0,0,2,2,0,1,
-        1,0,2,0,2,0,0,3,0,3,0,0,2,0,0,1,
-        1,0,2,2,2,0,0,3,3,3,0,0,2,2,0,1,
-        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-        1,0,3,3,0,0,1,1,1,0,0,0,0,0,0,1,
-        1,0,3,0,0,0,1,0,1,0,0,0,0,0,0,1,
-        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-      ]
-    },
-    {
-      "name": "Collision",
-      "type": "Collision",
-      "visible": true,
-      "data": [
-        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-        1,0,1,1,1,0,0,1,1,1,0,0,1,1,0,1,
-        1,0,1,0,1,0,0,1,0,1,0,0,1,0,0,1,
-        1,0,1,1,1,0,0,1,1,1,0,0,1,1,0,1,
-        1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
-        1,0,1,1,0,0,1,1,1,0,0,1,1,0,0,1,
-        1,0,1,0,0,0,1,0,1,0,0,1,0,0,0,1,
-        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-      ]
-    }
-  ]
-}
-```
-
----
-
-## テスト用Image
-
-![](doc/Sprite-0001.png)
-
----
-
-## データ形式（概要）
-
-### JSON（編集用）
-
-* `map.width` × `map.height` のセル数を持つ一次元配列 `layers[].data`
-* 配列は row-major：`data[y * width + x]`
-* `tileId=0` は空（描画しない）想定
-
-### BIN（実行用）
-
-* ヘッダ：magic/version/width/height/tileSize/layerCount
-* レイヤータイプ配列 + レイヤーデータ（int32 の連続領域）
-
----
-
-## フォルダ構成（例）
-
-```
-Project/
-  tilesets/
-    basic.png
-  maps/
-    stage_test_01.json
-  build/
-    stage_test_01.bin
-```
-
-※パスは原則 **Project基準の相対パス**を推奨します（例：`tilesets/basic.png`）。
-
----
-
-## 開発環境
-
-* OS：Windows 10/11
-* ビルドツール：CMake + Ninja
-* コンパイラ：MinGW-w64（g++ / clang でも可）
-* IDE：CLion（任意）
-* 使用ライブラリ：
-
-    * SDL3（ウィンドウ/入力/レンダリング）
-    * Dear ImGui（UI）
-    * nlohmann_json（JSON入出力）
-    * doctest（ユニットテスト）
-    * （必要に応じて）SDL3_image（PNG読み込み用）
-
----
-
-## ビルド方法
-
-### 1. 依存ライブラリ
-
-`third_party/` 配下に SDL3 / ImGui / nlohmann_json / doctest を配置します。
-（FetchContent / submodule どちらでも可。プロジェクト方針に合わせる）
-
-### 2. Configure & Build
+## ビルド
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-## アーキテクチャ（責務分離）
+## 実行ファイル
 
-* `domain/`：データモデル（TileMap/Tileset/Layer）
-* `pipeline/`：入出力と検証（JsonIO/BinIO/Validator/Diff）
-* `app/`：アプリ状態・ログ・ユースケース（EditorApp/State）
-* `ui/`：ImGui描画（Project/Viewport/Inspector/BottomTabs）
-* `tests/`：doctest によるユニットテスト
-
----
-
-## 想定ユースケース（環境開発視点）
-
-* レベルデータの編集と検証をツール側で完結させる
-* 実行時データへ変換し、問題を早期に検出する
-* 出力物（bin）の可用性をツール自身で検証できる状態にする
-
----
-
-## 作者
-LUO JIEWEN(ラ ケツブン)
+- `build/bin/AssetPack.exe`

@@ -1,5 +1,5 @@
 #pragma once
-#include "App/EditorAppState.hpp"
+#include "app/EditorAppState.hpp"
 
 namespace UI {
     void DrawProjectPanel(App::EditorAppState& s);
